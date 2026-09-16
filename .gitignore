@@ -1,0 +1,32 @@
+# Python
+backend/venv/
+backend/.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite3
+.pytest_cache/
+
+# Secrets
+.env
+*.env
+kaggle.json
+**/kaggle.json
+
+# Large datasets
+data/raw/
+data/processed/
+*.parquet
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
