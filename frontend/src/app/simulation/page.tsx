@@ -1,228 +1,503 @@
 'use client';
 
-import { useStore } from '@/store/useStore';
-import { useState, useEffect, useCallback } from 'react';
-import { Play, Square, Activity, Database, Brain, LayoutDashboard, UserCheck, Upload, Zap } from 'lucide-react';
-import { format } from 'date-fns';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useMemo, useState } from 'react';
+import {
+  Activity,
+  AlertCircle,
+  Brain,
+  CheckCircle2,
+  Database,
+  FlaskConical,
+  LayoutDashboard,
+  Loader2,
+  Play,
+  UserCheck,
+} from 'lucide-react';
+
 import { PageWrapper } from '@/components/layout/PageWrapper';
 
+import {
+  skyguardApi,
+  type ApiScenario,
+  type ApiScenarioResult,
+} from '@/lib/api';
+
+import { useStore } from '@/store/useStore';
+
+const scenarios: ApiScenario[] = [
+  {
+    name: 'normal',
+    description:
+      'Stable readings from all five AWS stations.',
+    expected_result: 'Normal',
+  },
+  {
+    name: 'regional_storm',
+    description:
+      'Pressure falls and humidity rises coherently across the region.',
+    expected_result: 'Genuine Weather Event',
+  },
+  {
+    name: 'regional_heatwave',
+    description:
+      'Temperature rises coherently across neighbouring stations.',
+    expected_result: 'Genuine Weather Event',
+  },
+  {
+    name: 'temperature_spike',
+    description:
+      'One station reports an isolated impossible temperature spike.',
+    expected_result: 'Sensor/Data Fault',
+  },
+  {
+    name: 'frozen_sensor',
+    description:
+      'One sensor repeats identical values while neighbours change.',
+    expected_result: 'Sensor/Data Fault',
+  },
+  {
+    name: 'gradual_drift',
+    description:
+      'One sensor slowly drifts away from its neighbours.',
+    expected_result: 'Sensor/Data Fault',
+  },
+  {
+    name: 'dropout',
+    description:
+      'One sensor value becomes missing.',
+    expected_result: 'Sensor/Data Fault',
+  },
+  {
+    name: 'noise_burst',
+    description:
+      'One station oscillates while nearby stations remain stable.',
+    expected_result: 'Sensor/Data Fault',
+  },
+  {
+    name: 'timestamp_error',
+    description:
+      'One station sends an out-of-order timestamp.',
+    expected_result: 'Sensor/Data Fault',
+  },
+  {
+    name: 'ambiguous_change',
+    description:
+      'An unclear pattern is routed for human review.',
+    expected_result: 'Uncertain - Human Review',
+  },
+];
+
+const stages = [
+  {
+    icon: Activity,
+    label: 'AWS Readings',
+  },
+  {
+    icon: Database,
+    label: 'Preprocessing',
+  },
+  {
+    icon: Brain,
+    label: 'Dual-Evidence AI',
+  },
+  {
+    icon: LayoutDashboard,
+    label: 'Classification',
+  },
+  {
+    icon: UserCheck,
+    label: 'Dashboard Update',
+  },
+];
+
+function delay(milliseconds: number) {
+  return new Promise<void>(resolve => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
 export default function SimulationPage() {
-  const { stations, runSimulationTick, injectSyntheticAnomaly } = useStore();
-  const [isRunning, setIsRunning] = useState(false);
-  const [logs, setLogs] = useState<{time: string, msg: string}[]>([]);
-  
-  const [anomalyType, setAnomalyType] = useState<'sensor_fault' | 'weather_event'>('weather_event');
-  const [targetStation, setTargetStation] = useState(stations[0]?.id || '');
-  const [activeStage, setActiveStage] = useState(0);
-   const addLog = useCallback((msg: string) => {
-  setLogs(prev => [
-    { time: format(new Date(), 'HH:mm:ss'), msg },
-    ...prev
-  ].slice(0, 50));
-    }, []);
+  const refreshFromApi = useStore(
+    state => state.refreshFromApi
+  );
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (isRunning) {
-      interval = setInterval(() => {
-        runSimulationTick();
-        addLog(`Simulation tick: ingested new normal readings from AWS.`);
-        setActiveStage(prev => (prev + 1) % 5);
-      }, 3000);
-    }
-    return () => clearInterval(interval);
-  }, [isRunning, runSimulationTick, addLog]);
+  const dataSource = useStore(
+    state => state.dataSource
+  );
 
-  
+  const stations = useStore(
+    state => state.stations
+  );
 
-  const handleInject = () => {
-    injectSyntheticAnomaly(anomalyType, targetStation);
-    const stationName = stations.find(s => s.id === targetStation)?.name || targetStation;
-    addLog(`INJECTED ${anomalyType.toUpperCase()} at ${stationName}.`);
-    
-    // Simulate pipeline animation
-    setActiveStage(0);
-    setTimeout(() => setActiveStage(1), 500);
-    setTimeout(() => setActiveStage(2), 1000);
-    setTimeout(() => {
-      setActiveStage(3);
-      addLog(`Dual-Evidence Engine classified anomaly as ${anomalyType.replace('_', ' ')}.`);
-    }, 1500);
-    setTimeout(() => setActiveStage(4), 2000);
+  const [selectedScenario, setSelectedScenario] =
+    useState('regional_storm');
+
+  const [isRunning, setIsRunning] =
+    useState(false);
+
+  const [activeStage, setActiveStage] =
+    useState(-1);
+
+  const [result, setResult] =
+    useState<ApiScenarioResult | null>(null);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  const [logs, setLogs] = useState<
+    {
+      time: string;
+      message: string;
+    }[]
+  >([]);
+
+  const selected = scenarios.find(
+    scenario =>
+      scenario.name === selectedScenario
+  );
+
+  const resultCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+
+    result?.final_results.forEach(reading => {
+      counts[reading.classification] =
+        (counts[reading.classification] ?? 0) + 1;
+    });
+
+    return counts;
+  }, [result]);
+
+  const addLog = (message: string) => {
+    setLogs(current =>
+      [
+        {
+          time: new Date().toLocaleTimeString(),
+          message,
+        },
+        ...current,
+      ].slice(0, 25)
+    );
   };
 
-  const pipelineStages = [
-    { icon: Activity, label: 'AWS Sensors' },
-    { icon: Database, label: 'Preprocessing' },
-    { icon: Brain, label: 'Dual-Evidence Engine' },
-    { icon: LayoutDashboard, label: 'Dashboard & Alerts' },
-    { icon: UserCheck, label: 'Operator Action' },
-  ];
+  const runScenario = async () => {
+    setIsRunning(true);
+    setError(null);
+    setResult(null);
+    setActiveStage(0);
+
+    addLog(`Starting: ${selectedScenario}`);
+
+    try {
+      await delay(250);
+
+      setActiveStage(1);
+      addLog('AWS readings generated by FastAPI.');
+
+      await delay(250);
+
+      setActiveStage(2);
+      addLog(
+        'Dual-Evidence Engine analysing data.'
+      );
+
+      const response =
+        await skyguardApi.runScenario(
+          selectedScenario
+        );
+
+      setActiveStage(3);
+
+      addLog(
+        `${response.readings_processed} readings processed.`
+      );
+
+      await refreshFromApi();
+      await delay(250);
+
+      setResult(response);
+      setActiveStage(4);
+
+      addLog(
+        'Dashboard refreshed with ML results.'
+      );
+    } catch (caughtError) {
+      const message =
+        caughtError instanceof Error
+          ? caughtError.message
+          : 'Unable to run this scenario.';
+
+      setError(message);
+      setActiveStage(-1);
+
+      addLog(`ERROR: ${message}`);
+    } finally {
+      setIsRunning(false);
+    }
+  };
 
   return (
     <PageWrapper>
       <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <h1 className="text-3xl font-bold text-white tracking-tight drop-shadow-md">Data Simulation Engine</h1>
-          <div className="flex gap-3">
-            <button
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition-all shadow-lg border border-slate-700/50"
-              onClick={() => {
-                addLog("Uploaded historical CSV data (Mock). 50 rows ingested.");
-              }}
-            >
-              <Upload className="h-4 w-4" /> Upload CSV
-            </button>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setIsRunning(!isRunning)}
-              className={`flex items-center gap-2 px-4 py-2 text-white rounded-lg text-sm font-medium transition-all shadow-lg border ${
-                isRunning 
-                  ? 'bg-red-600/90 hover:bg-red-500 border-red-500/50 shadow-[0_0_15px_rgba(220,38,38,0.4)]' 
-                  : 'bg-emerald-600/90 hover:bg-emerald-500 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.4)]'
-              }`}
-            >
-              {isRunning ? (
-                <><Square className="h-4 w-4" /> Stop Simulation</>
-              ) : (
-                <><Play className="h-4 w-4" /> Start Simulation</>
-              )}
-            </motion.button>
-          </div>
-        </div>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-cyan-400">
+              <FlaskConical className="h-4 w-4" />
+              Judge Challenge Mode
+            </p>
 
-        {/* Pipeline Visualizer */}
-        <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/50 rounded-xl p-8 relative overflow-hidden shadow-xl">
-          <div className="absolute inset-0 opacity-10 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-900 via-slate-900 to-slate-900" />
-          
-          <h2 className="text-sm font-semibold text-slate-400 mb-8 text-center uppercase tracking-widest relative z-10">Data Ingestion Pipeline</h2>
-          
-          <div className="relative z-10 flex flex-col md:flex-row justify-between items-center gap-4">
-            {pipelineStages.map((stage, idx) => {
-              const isActive = activeStage === idx && (isRunning || logs.length > 0);
+            <h1 className="text-3xl font-bold text-white">
+              Real Backend Scenario Lab
+            </h1>
+
+            <p className="mt-2 text-sm text-slate-400">
+              Send controlled AWS cases through the
+              FastAPI and ML pipeline.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-300">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
+
+            {dataSource === 'api'
+              ? 'Live API Data'
+              : 'Fallback Data'}
+          </div>
+        </header>
+
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <Metric
+            label="Connected Stations"
+            value={stations.length}
+          />
+
+          <Metric
+            label="Backend Scenarios"
+            value={scenarios.length}
+          />
+
+          <Metric
+            label="Last Result"
+            value={result ? 'Completed' : 'Ready'}
+          />
+        </section>
+
+        <section className="rounded-2xl border border-slate-800/70 bg-slate-900/50 p-6 shadow-xl">
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-5">
+            {stages.map((stage, index) => {
+              const Icon = stage.icon;
+
+              const completed =
+                activeStage > index;
+
+              const active =
+                activeStage === index;
+
               return (
-                <div key={idx} className="flex flex-col items-center flex-1 relative group">
-                  {/* Connecting Line */}
-                  {idx < pipelineStages.length - 1 && (
-                    <div className="hidden md:block absolute top-6 left-[60%] right-[-40%] h-0.5 bg-slate-800/80 z-0">
-                      <motion.div 
-                        initial={false}
-                        animate={{ width: activeStage > idx ? '100%' : '0%' }}
-                        transition={{ duration: 0.5, ease: "easeInOut" }}
-                        className="h-full bg-indigo-500" 
-                      />
-                    </div>
-                  )}
-                  
-                  <motion.div 
-                    initial={false}
-                    animate={isActive ? { scale: 1.1, boxShadow: "0 0 20px rgba(79,70,229,0.5)" } : { scale: 1, boxShadow: "none" }}
-                    className={`w-12 h-12 rounded-full flex items-center justify-center relative z-10 transition-colors duration-300 ${
-                      isActive 
-                        ? 'bg-indigo-600' 
-                        : activeStage > idx 
-                          ? 'bg-indigo-900/50 text-indigo-400 border border-indigo-500/30'
-                          : 'bg-slate-800 text-slate-500 border border-slate-700/50'
+                <div
+                  key={stage.label}
+                  className="flex flex-col items-center text-center"
+                >
+                  <div
+                    className={`flex h-12 w-12 items-center justify-center rounded-full border transition-all ${
+                      active
+                        ? 'scale-110 border-cyan-400 bg-cyan-500/20 text-cyan-300 shadow-[0_0_22px_rgba(34,211,238,0.35)]'
+                        : completed
+                          ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                          : 'border-slate-700 bg-slate-800 text-slate-500'
                     }`}
                   >
-                    <stage.icon className={`h-5 w-5 ${isActive || activeStage > idx ? 'text-white' : 'text-slate-400'}`} />
-                  </motion.div>
-                  <span className={`text-xs font-medium mt-3 text-center transition-colors ${isActive ? 'text-indigo-400' : 'text-slate-400'}`}>
+                    {completed ? (
+                      <CheckCircle2 className="h-5 w-5" />
+                    ) : (
+                      <Icon className="h-5 w-5" />
+                    )}
+                  </div>
+
+                  <span className="mt-3 text-xs font-medium text-slate-300">
                     {stage.label}
                   </span>
                 </div>
               );
             })}
           </div>
-        </div>
+        </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Injector Controls */}
-          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/50 rounded-xl p-6 shadow-xl relative overflow-hidden">
-            <div className="absolute -top-10 -right-10 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
-            <h2 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
-              <Zap className="h-5 w-5 text-indigo-400" /> Synthetic Anomaly Injector
+        <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <div className="rounded-2xl border border-slate-800/70 bg-slate-900/50 p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-white">
+              Select a Challenge
             </h2>
-            <div className="space-y-4 relative z-10">
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-1.5">Target Station</label>
-                <select 
-                  value={targetStation}
-                  onChange={e => setTargetStation(e.target.value)}
-                  className="w-full bg-slate-950/50 border border-slate-800/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer"
+
+            <label className="mt-5 block text-sm text-slate-400">
+              Scenario
+            </label>
+
+            <select
+              value={selectedScenario}
+              disabled={isRunning}
+              onChange={event =>
+                setSelectedScenario(
+                  event.target.value
+                )
+              }
+              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2.5 text-sm text-white outline-none focus:ring-2 focus:ring-cyan-500/50"
+            >
+              {scenarios.map(scenario => (
+                <option
+                  key={scenario.name}
+                  value={scenario.name}
                 >
-                  {stations.map(s => <option key={s.id} value={s.id}>{s.name} ({s.id})</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-400 mb-1.5">Anomaly Type</label>
-                <select 
-                  value={anomalyType}
-                  onChange={e =>
-                          setAnomalyType(
-                            e.target.value as 'sensor_fault' | 'weather_event'
-                              )
-                          }
-                  className="w-full bg-slate-950/50 border border-slate-800/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer"
-                >
-                  <option value="weather_event">Genuine Weather Spike</option>
-                  <option value="sensor_fault">Sensor Hardware Fault</option>
-                </select>
-              </div>
-              <motion.button 
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleInject}
-                className="w-full py-2.5 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-all shadow-lg border border-indigo-500/30"
-              >
-                Inject Anomaly
-              </motion.button>
-              <p className="text-xs text-slate-500 text-center mt-2">
-                Instantly pushes an anomalous reading through the pipeline and generates an alert.
+                  {scenario.name
+                    .replaceAll('_', ' ')
+                    .replace(
+                      /\b\w/g,
+                      letter =>
+                        letter.toUpperCase()
+                    )}
+                </option>
+              ))}
+            </select>
+
+            <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+              <p className="text-sm leading-6 text-slate-300">
+                {selected?.description}
+              </p>
+
+              <p className="mt-3 text-xs font-semibold text-cyan-400">
+                Expected:{' '}
+                {selected?.expected_result}
               </p>
             </div>
+
+            <button
+              onClick={runScenario}
+              disabled={isRunning}
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-cyan-600 px-4 py-3 text-sm font-bold text-white shadow-[0_0_20px_rgba(8,145,178,0.25)] transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isRunning ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Running Pipeline...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  Run Backend Scenario
+                </>
+              )}
+            </button>
+
+            {error && (
+              <div className="mt-4 flex gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                {error}
+              </div>
+            )}
           </div>
 
-          {/* Live Console Logs */}
-          <div className="bg-[#0a0a0a]/80 backdrop-blur-md border border-slate-800/50 rounded-xl p-4 lg:col-span-2 flex flex-col font-mono shadow-xl relative overflow-hidden">
-            <div className="flex items-center justify-between mb-3 border-b border-slate-800/50 pb-2">
-              <h2 className="text-sm font-semibold text-slate-400 flex items-center gap-2">
-                <Database className="h-4 w-4" /> Pipeline Output Log
+          <div className="rounded-2xl border border-slate-800/70 bg-[#070b14] p-5 font-mono shadow-xl lg:col-span-2">
+            <div className="mb-4 flex items-center justify-between border-b border-slate-800 pb-3">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-300">
+                <Database className="h-4 w-4 text-cyan-400" />
+                Live Pipeline Log
               </h2>
-              <div className="flex gap-1.5">
-                <div className="w-3 h-3 rounded-full bg-red-500/80 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>
-                <div className="w-3 h-3 rounded-full bg-amber-500/80 shadow-[0_0_8px_rgba(245,158,11,0.5)]"></div>
-                <div className="w-3 h-3 rounded-full bg-emerald-500/80 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-              </div>
+
+              <span className="text-xs text-slate-600">
+                FastAPI :8000
+              </span>
             </div>
-            <div className="flex-1 overflow-y-auto space-y-1 mt-2 text-xs h-64 scrollbar-thin scrollbar-thumb-slate-800 scrollbar-track-transparent">
-              <AnimatePresence initial={false}>
-                {logs.map((log, i) => (
-                  <motion.div 
-                    key={log.time + i} 
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="flex gap-3 hover:bg-white/5 px-2 py-1 rounded transition-colors"
+
+            <div className="h-64 space-y-2 overflow-y-auto">
+              {logs.map((log, index) => (
+                <div
+                  key={`${log.time}-${index}`}
+                  className="flex gap-3 text-xs"
+                >
+                  <span className="shrink-0 text-slate-600">
+                    [{log.time}]
+                  </span>
+
+                  <span
+                    className={
+                      log.message.startsWith(
+                        'ERROR'
+                      )
+                        ? 'text-red-400'
+                        : 'text-emerald-400'
+                    }
                   >
-                    <span className="text-slate-500 shrink-0">[{log.time}]</span>
-                    <span className={log.msg.includes('INJECTED') || log.msg.includes('classified anomaly') ? 'text-amber-400/90' : 'text-emerald-400/90'}>
-                      {log.msg}
-                    </span>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+                    {log.message}
+                  </span>
+                </div>
+              ))}
+
               {logs.length === 0 && (
-                <div className="text-slate-600 italic px-2">Waiting for simulation to start...</div>
+                <p className="text-xs italic text-slate-600">
+                  Select a scenario and run the
+                  pipeline.
+                </p>
               )}
             </div>
           </div>
+        </section>
 
-        </div>
+        {result && (
+          <section className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
+              <CheckCircle2 className="h-5 w-5 text-emerald-400" />
+              Scenario Completed
+            </h2>
+
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {Object.entries(
+                resultCounts
+              ).map(
+                ([
+                  classification,
+                  count,
+                ]) => (
+                  <div
+                    key={classification}
+                    className="rounded-xl border border-slate-800 bg-slate-950/50 p-4"
+                  >
+                    <p className="text-xs text-slate-500">
+                      {classification}
+                    </p>
+
+                    <p className="mt-2 text-2xl font-bold text-white">
+                      {count}
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
+
+            <p className="mt-4 text-xs leading-5 text-slate-500">
+              {result.note}
+            </p>
+          </section>
+        )}
       </div>
     </PageWrapper>
+  );
+}
+
+function Metric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-800/70 bg-slate-900/50 p-4">
+      <p className="text-xs uppercase tracking-wider text-slate-500">
+        {label}
+      </p>
+
+      <p className="mt-2 text-2xl font-bold text-white">
+        {value}
+      </p>
+    </div>
   );
 }

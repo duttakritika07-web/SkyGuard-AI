@@ -2,7 +2,7 @@
 
 import { useStore } from '@/store/useStore';
 import Link from 'next/link';
-import { ShieldAlert, AlertTriangle, CloudRain, Activity, RefreshCw, ChevronRight } from 'lucide-react';
+import { ShieldAlert, AlertTriangle, CloudRain, Activity, FlaskConical, ChevronRight } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { motion, Variants } from 'framer-motion';
 import { PageWrapper } from '@/components/layout/PageWrapper';
@@ -23,7 +23,7 @@ const itemVariants: Variants = {
 };
 
 export default function Dashboard() {
-  const { stations, alerts, runSimulationTick } = useStore();
+  const { stations, alerts } = useStore();
 
   const totalStations = stations.length;
   const normalStations = stations.filter(s => s.status === 'normal').length;
@@ -54,15 +54,13 @@ export default function Dashboard() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold text-white tracking-tight drop-shadow-md">System Overview</h1>
-          <motion.button
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={runSimulationTick}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-colors shadow-[0_0_20px_rgba(79,70,229,0.3)] hover:shadow-[0_0_25px_rgba(79,70,229,0.5)] border border-indigo-500/50"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Run Simulation Tick
-          </motion.button>
+          <Link
+  href="/simulation"
+  className="flex items-center gap-2 rounded-lg border border-cyan-500/50 bg-cyan-600/90 px-4 py-2 text-sm font-medium text-white shadow-[0_0_20px_rgba(8,145,178,0.3)] transition-all hover:bg-cyan-500 hover:shadow-[0_0_25px_rgba(8,145,178,0.5)]"
+>
+  <FlaskConical className="h-4 w-4" />
+  Open Scenario Lab
+</Link>
         </div>
 
         {/* Summary Cards */}
