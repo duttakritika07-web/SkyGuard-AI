@@ -1,10 +1,21 @@
 import { create } from 'zustand';
 import { Station, Reading, Alert, mockStations, generateMockReadings, initialMockAlerts, DecisionStatus, AlertStatus } from './mockData';
+import { skyguardApi } from '@/lib/api';
+
+import {
+  predictionToAlert,
+  predictionToReading,
+  snapshotToStation,
+} from '@/lib/adapters';
 
 interface AppState {
   stations: Station[];
   readings: Record<string, Reading[]>;
   alerts: Alert[];
+  dataSource: 'mock' | 'api';
+isLoading: boolean;
+apiError: string | null;
+lastUpdated: string | null;
   
   // Actions
   acknowledgeAlert: (alertId: string) => void;
@@ -13,13 +24,18 @@ interface AppState {
   submitFeedback: (alertId: string, isCorrect: boolean, comment: string) => void;
   scheduleMaintenance: (stationId: string, sensorId: string, date: string, notes: string) => void;
   flagForManualCheck: (stationId: string) => void;
+  refreshFromApi: () => Promise<void>;
+
+runBackendScenario: (
+  scenarioName: string
+) => Promise<void>;
   
   // Simulation Actions
   runSimulationTick: () => void;
   injectSyntheticAnomaly: (type: 'sensor_fault' | 'weather_event', stationId: string) => void;
 }
 
-export const useStore = create<AppState>((set) => {
+export const useStore = create<AppState>((set, get) => {
   // Initialize readings for each station
   const initialReadings: Record<string, Reading[]> = {};
   mockStations.forEach(st => {
@@ -30,6 +46,96 @@ export const useStore = create<AppState>((set) => {
     stations: mockStations,
     readings: initialReadings,
     alerts: initialMockAlerts,
+    dataSource: 'mock',
+isLoading: false,
+apiError: null,
+lastUpdated: null,
+
+refreshFromApi: async () => {
+  set({
+    isLoading: true,
+    apiError: null,
+  });
+
+  try {
+    const [snapshots, apiAlerts] =
+      await Promise.all([
+        skyguardApi.snapshots(),
+        skyguardApi.alerts(),
+      ]);
+
+    const histories = await Promise.all(
+      snapshots.map(snapshot =>
+        skyguardApi.readingHistory(
+          snapshot.station.id
+        )
+      )
+    );
+
+    const apiReadings: Record<
+      string,
+      Reading[]
+    > = {};
+
+    snapshots.forEach((snapshot, index) => {
+      apiReadings[snapshot.station.id] =
+        histories[index]
+          .map(predictionToReading)
+          .reverse();
+    });
+
+    set({
+      stations:
+        snapshots.map(snapshotToStation),
+
+      readings: apiReadings,
+
+      alerts:
+        apiAlerts.map(predictionToAlert),
+
+      dataSource: 'api',
+      isLoading: false,
+      apiError: null,
+      lastUpdated: new Date().toISOString(),
+    });
+  } catch (error) {
+    set({
+      isLoading: false,
+      dataSource: 'mock',
+
+      apiError:
+        error instanceof Error
+          ? error.message
+          : 'Unable to load backend data.',
+    });
+  }
+},
+
+runBackendScenario: async (
+  scenarioName
+) => {
+  set({
+    isLoading: true,
+    apiError: null,
+  });
+
+  try {
+    await skyguardApi.runScenario(
+      scenarioName
+    );
+
+    await get().refreshFromApi();
+  } catch (error) {
+    set({
+      isLoading: false,
+
+      apiError:
+        error instanceof Error
+          ? error.message
+          : 'Unable to run the backend scenario.',
+    });
+  }
+},
 
     acknowledgeAlert: (alertId) => set((state) => {
       const newAlerts = state.alerts.map(a => 
@@ -132,9 +238,17 @@ export const useStore = create<AppState>((set) => {
     }),
 
     runSimulationTick: () => set((state) => {
+      if (state.stations.length === 0) {
+  return state;
+}
       // Pick a random station and add a normal reading
       const station = state.stations[Math.floor(Math.random() * state.stations.length)];
-      const lastReading = state.readings[station.id][0];
+      const stationReadings =
+  state.readings[station.id] ?? [];
+
+const lastReading =
+  stationReadings[0] ??
+  station.lastReading;
       
       const newReading: Reading = {
         id: `r-${station.id}-${Date.now()}`,
@@ -146,7 +260,10 @@ export const useStore = create<AppState>((set) => {
         isAnomalous: false
       };
 
-      const newReadingsForStation = [newReading, ...state.readings[station.id]].slice(0, 50); // Keep last 50
+      const newReadingsForStation = [
+  newReading,
+  ...stationReadings,
+].slice(0, 50);// Keep last 50
       
       return {
         readings: { ...state.readings, [station.id]: newReadingsForStation },
@@ -161,7 +278,12 @@ export const useStore = create<AppState>((set) => {
       const station = state.stations.find(s => s.id === stationId);
       if (!station) return state;
 
-      const lastReading = state.readings[station.id][0];
+      const stationReadings =
+  state.readings[station.id] ?? [];
+
+const lastReading =
+  stationReadings[0] ??
+  station.lastReading;
       let newTemp = lastReading.temperature;
       let newPress = lastReading.pressure;
       let newHum = lastReading.humidity;
@@ -202,7 +324,14 @@ export const useStore = create<AppState>((set) => {
       };
 
       return {
-        readings: { ...state.readings, [station.id]: [newReading, ...state.readings[station.id]].slice(0, 50) },
+      readings: {
+  ...state.readings,
+
+  [station.id]: [
+    newReading,
+    ...stationReadings,
+  ].slice(0, 50),
+},
         alerts: [newAlert, ...state.alerts],
         stations: state.stations.map(st => st.id === station.id ? { ...st, status: type, lastReading: newReading } : st)
       };

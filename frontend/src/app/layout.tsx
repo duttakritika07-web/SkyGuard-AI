@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TopBar } from "@/components/layout/TopBar";
+import { DataBootstrap } from '@/components/DataBootstrap';
 
 const inter = Inter({
   subsets: ["latin"],
@@ -24,6 +25,7 @@ export default function RootLayout({
       <body
         className={`${inter.variable} font-sans antialiased h-full overflow-hidden`}
       >
+         <DataBootstrap />
         <div className="flex h-full">
           <Sidebar />
           <div className="flex flex-1 flex-col overflow-hidden">
