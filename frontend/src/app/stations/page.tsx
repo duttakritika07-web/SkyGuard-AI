@@ -1,14 +1,14 @@
 'use client';
 
 import { useStore } from '@/store/useStore';
-import { useState } from 'react';
+import { Suspense,useState } from 'react';
 import { Search, Map, List, Eye } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { PageWrapper } from '@/components/layout/PageWrapper';
 
-export default function Stations() {
+function StationsContent() {
   const { stations } = useStore();
   const searchParams = useSearchParams();
   const filterParam = searchParams.get('filter');
@@ -180,5 +180,18 @@ export default function Stations() {
         )}
       </div>
     </PageWrapper>
+  );
+}
+export default function StationsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-64 items-center justify-center text-sm font-medium text-slate-400">
+          Loading stations...
+        </div>
+      }
+    >
+      <StationsContent />
+    </Suspense>
   );
 }

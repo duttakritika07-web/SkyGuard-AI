@@ -2,7 +2,7 @@
 
 import { useStore } from '@/store/useStore';
 import { useState } from 'react';
-import { AlertTriangle, CheckSquare, Eye } from 'lucide-react';
+import { CheckSquare, Eye } from 'lucide-react';
 import { format } from 'date-fns';
 import { AlertDetailModal } from '@/components/alerts/AlertDetailModal';
 import { motion, AnimatePresence } from 'framer-motion';

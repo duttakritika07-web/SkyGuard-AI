@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Station, Reading, Alert, mockStations, generateMockReadings, initialMockAlerts, DecisionStatus, AlertStatus, Severity } from './mockData';
+import { Station, Reading, Alert, mockStations, generateMockReadings, initialMockAlerts, DecisionStatus, AlertStatus } from './mockData';
 
 interface AppState {
   stations: Station[];
@@ -19,7 +19,7 @@ interface AppState {
   injectSyntheticAnomaly: (type: 'sensor_fault' | 'weather_event', stationId: string) => void;
 }
 
-export const useStore = create<AppState>((set, get) => {
+export const useStore = create<AppState>((set) => {
   // Initialize readings for each station
   const initialReadings: Record<string, Reading[]> = {};
   mockStations.forEach(st => {
@@ -96,7 +96,7 @@ export const useStore = create<AppState>((set, get) => {
       return { alerts: newAlerts };
     }),
 
-    scheduleMaintenance: (stationId, sensorId, date, notes) => set((state) => {
+    scheduleMaintenance: (stationId, sensorId ) => set((state) => {
       const newStations = state.stations.map(st => {
         if (st.id === stationId) {
           return {

@@ -106,7 +106,7 @@ export default function SettingsPage() {
                   />
                   <p className="text-xs text-slate-400 mt-3 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0" />
-                    Alerts will only be generated if the ML model's confidence exceeds this threshold.
+                    Alerts will only be generated if the ML model&apos;s confidence exceeds this threshold.
                   </p>
                 </div>
 

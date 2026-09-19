@@ -48,11 +48,15 @@ export default function MaintenancePage() {
   };
 
   const handleOpenScheduleForm = (stationId: string, sensorId: string) => {
-    setSelectedSensorInfo({ stationId, sensorId });
-    setScheduleDate(new Date(Date.now() + 86400000).toISOString().split('T')[0]); // Tomorrow
-    setScheduleNotes('');
-    setShowScheduleForm(true);
-  };
+  setSelectedSensorInfo({ stationId, sensorId });
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  setScheduleDate(tomorrow.toISOString().split('T')[0]);
+
+  setScheduleNotes('');
+  setShowScheduleForm(true);
+};
 
   const handleScheduleSubmit = () => {
     if (selectedSensorInfo && scheduleDate) {
@@ -68,8 +72,10 @@ export default function MaintenancePage() {
     .map(s => ({
       stationName: s.stationName,
       sensorType: s.type,
-      date: format(new Date(Date.now() + 86400000), 'MMM d, yyyy'), // Fake tomorrow date
-      notes: "Scheduled via Dashboard"
+      date: scheduleDate
+  ? format(new Date(`${scheduleDate}T00:00:00`), 'MMM d, yyyy')
+  : 'Date pending',
+notes: scheduleNotes || 'Scheduled via Dashboard'
     }));
 
   return (

@@ -2,7 +2,7 @@
 
 import { Alert, DecisionStatus } from '@/store/mockData';
 import { useStore } from '@/store/useStore';
-import { X, CheckCircle, PenTool, Wrench, MessageSquare, ArrowRight, Brain, Settings } from 'lucide-react';
+import { X, CheckCircle, PenTool, Wrench, MessageSquare, Brain, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { format } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
@@ -165,7 +165,11 @@ export function AlertDetailModal({ alert, onClose }: AlertDetailModalProps) {
                   <div>
                     <span className="font-medium text-slate-300">{item.actor}:</span>{' '}
                     <span className="text-slate-400">{item.action}</span>
-                    {item.comment && <div className="text-slate-500 mt-0.5 italic">"{item.comment}"</div>}
+                    {item.comment && (
+  <div className="text-slate-500 mt-0.5 italic">
+    &ldquo;{item.comment}&rdquo;
+  </div>
+)}
                   </div>
                 </div>
               ))}
@@ -262,7 +266,7 @@ export function AlertDetailModal({ alert, onClose }: AlertDetailModalProps) {
               <h3 className="text-lg font-semibold text-white mb-4">AI Feedback</h3>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-400 mb-2">Was the AI's decision correct?</label>
+                  <label className="block text-sm font-medium text-slate-400 mb-2">Was the AI&apos;s decision correct?</label>
                   <div className="flex gap-4">
                     <button 
                       onClick={() => setFeedbackIsCorrect(true)}

@@ -1,10 +1,9 @@
 'use client';
 
 import { useStore } from '@/store/useStore';
-import { useParams } from 'next/navigation';
 import { useState, use } from 'react';
 import Link from 'next/link';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { AlertTriangle, CheckCircle, Wrench, Activity, Flag } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -105,10 +104,10 @@ export default function StationDetailPage(props: { params: Promise<{ id: string 
                 <Activity className="h-5 w-5 text-indigo-400" /> Sensor Data
               </h2>
               <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-1">
-                {['1h', '24h', '7d'].map((tr) => (
+                {(['1h', '24h', '7d'] as const).map((tr) => (
                   <button
                     key={tr}
-                    onClick={() => setTimeRange(tr as any)}
+                    onClick={() => setTimeRange(tr)}
                     className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                       timeRange === tr ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-300 hover:bg-slate-800'
                     }`}
@@ -129,7 +128,7 @@ export default function StationDetailPage(props: { params: Promise<{ id: string 
                     <XAxis dataKey="time" stroke="#64748b" fontSize={12} tickMargin={10} />
                     <YAxis stroke="#64748b" fontSize={12} domain={['auto', 'auto']} />
                     <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#f8fafc' }} />
-                    <Line type="monotone" dataKey="temperature" stroke="#ef4444" strokeWidth={2} dot={(props: any) => {
+                    <Line type="monotone" dataKey="temperature" stroke="#ef4444" strokeWidth={2} dot={(props) => {
                       const { cx, cy, payload } = props;
                       if (payload.isAnomalous) {
                         return <circle cx={cx} cy={cy} r={4} fill="#ef4444" stroke="#7f1d1d" strokeWidth={2} />;
@@ -151,7 +150,7 @@ export default function StationDetailPage(props: { params: Promise<{ id: string 
                     <XAxis dataKey="time" stroke="#64748b" fontSize={12} tickMargin={10} />
                     <YAxis stroke="#64748b" fontSize={12} domain={['auto', 'auto']} />
                     <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#f8fafc' }} />
-                    <Line type="monotone" dataKey="pressure" stroke="#3b82f6" strokeWidth={2} dot={(props: any) => {
+                    <Line type="monotone" dataKey="pressure" stroke="#3b82f6" strokeWidth={2} dot={(props) => {
                       const { cx, cy, payload } = props;
                       if (payload.isAnomalous) {
                         return <circle cx={cx} cy={cy} r={4} fill="#3b82f6" stroke="#1e3a8a" strokeWidth={2} />;
@@ -173,7 +172,7 @@ export default function StationDetailPage(props: { params: Promise<{ id: string 
                     <XAxis dataKey="time" stroke="#64748b" fontSize={12} tickMargin={10} />
                     <YAxis stroke="#64748b" fontSize={12} domain={[0, 100]} />
                     <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', color: '#f8fafc' }} />
-                    <Line type="monotone" dataKey="humidity" stroke="#10b981" strokeWidth={2} dot={(props: any) => {
+                    <Line type="monotone" dataKey="humidity" stroke="#10b981" strokeWidth={2} dot={(props) => {
                       const { cx, cy, payload } = props;
                       if (payload.isAnomalous) {
                         return <circle cx={cx} cy={cy} r={4} fill="#10b981" stroke="#064e3b" strokeWidth={2} />;

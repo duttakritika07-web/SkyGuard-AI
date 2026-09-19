@@ -10,11 +10,8 @@ export function TopBar() {
   const activeAlertsCount = alerts.filter(a => a.status === 'open').length;
   
   const [time, setTime] = useState("");
-  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
-    setTime(new Date().toLocaleTimeString());
     const interval = setInterval(() => {
       setTime(new Date().toLocaleTimeString());
     }, 1000);
@@ -25,7 +22,7 @@ export function TopBar() {
     <div className="flex h-16 shrink-0 items-center gap-x-4 border-b border-slate-800/50 bg-slate-950/40 backdrop-blur-md px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8 justify-between z-10 sticky top-0">
       <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6 items-center">
         <div className="text-slate-400 text-sm font-medium">
-          Live System Time: <span className="text-slate-200">{mounted ? time : "--:--:--"}</span>
+          Live System Time: <span className="text-slate-200">{time || "--:--:--"}</span>
         </div>
       </div>
       <div className="flex items-center gap-x-4 lg:gap-x-6">

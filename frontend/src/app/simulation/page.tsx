@@ -1,7 +1,7 @@
 'use client';
 
 import { useStore } from '@/store/useStore';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Play, Square, Activity, Database, Brain, LayoutDashboard, UserCheck, Upload, Zap } from 'lucide-react';
 import { format } from 'date-fns';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,6 +15,12 @@ export default function SimulationPage() {
   const [anomalyType, setAnomalyType] = useState<'sensor_fault' | 'weather_event'>('weather_event');
   const [targetStation, setTargetStation] = useState(stations[0]?.id || '');
   const [activeStage, setActiveStage] = useState(0);
+   const addLog = useCallback((msg: string) => {
+  setLogs(prev => [
+    { time: format(new Date(), 'HH:mm:ss'), msg },
+    ...prev
+  ].slice(0, 50));
+    }, []);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -26,11 +32,9 @@ export default function SimulationPage() {
       }, 3000);
     }
     return () => clearInterval(interval);
-  }, [isRunning, runSimulationTick]);
+  }, [isRunning, runSimulationTick, addLog]);
 
-  const addLog = (msg: string) => {
-    setLogs(prev => [{ time: format(new Date(), 'HH:mm:ss'), msg }, ...prev].slice(0, 50));
-  };
+  
 
   const handleInject = () => {
     injectSyntheticAnomaly(anomalyType, targetStation);
@@ -157,7 +161,11 @@ export default function SimulationPage() {
                 <label className="block text-sm font-medium text-slate-400 mb-1.5">Anomaly Type</label>
                 <select 
                   value={anomalyType}
-                  onChange={e => setAnomalyType(e.target.value as any)}
+                  onChange={e =>
+                          setAnomalyType(
+                            e.target.value as 'sensor_fault' | 'weather_event'
+                              )
+                          }
                   className="w-full bg-slate-950/50 border border-slate-800/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer"
                 >
                   <option value="weather_event">Genuine Weather Spike</option>
