@@ -1,228 +1,887 @@
 'use client';
 
 import { useState } from 'react';
-import { FileText, Download, FileSpreadsheet, Filter, CheckCircle, Loader2 } from 'lucide-react';
-import { format, subDays } from 'date-fns';
-import { motion, AnimatePresence } from 'framer-motion';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Database,
+  Download,
+  FileSpreadsheet,
+  Filter,
+} from 'lucide-react';
+import { motion } from 'framer-motion';
 import { PageWrapper } from '@/components/layout/PageWrapper';
+import { useStore } from '@/store/useStore';
+
+type ReportType =
+  | 'station_overview'
+  | 'reading_history'
+  | 'alert_logs'
+  | 'sensor_health';
+
+type DateRange = '24h' | '7d' | '30d' | 'all';
+
+type CsvValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined;
+
+type CsvRow = Record<string, CsvValue>;
+
+interface PreparedReport {
+  columns: string[];
+  rows: CsvRow[];
+  filePrefix: string;
+}
+
+interface GeneratedReport {
+  filename: string;
+  rowCount: number;
+  generatedAt: string;
+  columns: string[];
+  previewRows: CsvRow[];
+}
+
+const REPORT_OPTIONS: Record<
+  ReportType,
+  {
+    label: string;
+    description: string;
+  }
+> = {
+  station_overview: {
+    label: 'Station Overview',
+    description:
+      'Station identity, coordinates, current decision, health and latest readings.',
+  },
+
+  reading_history: {
+    label: 'Reading History',
+    description:
+      'Temperature, pressure and humidity observations with anomaly flags.',
+  },
+
+  alert_logs: {
+    label: 'Incident & Alert Logs',
+    description:
+      'Classification, severity, workflow status and recommended operator action.',
+  },
+
+  sensor_health: {
+    label: 'Sensor Health',
+    description:
+      'Temperature, pressure and humidity sensor condition for every station.',
+  },
+};
+
+const RANGE_MILLISECONDS: Record<
+  Exclude<DateRange, 'all'>,
+  number
+> = {
+  '24h': 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+  '30d': 30 * 24 * 60 * 60 * 1000,
+};
+
+function humanize(value: string) {
+  return value
+    .split('_')
+    .map(
+      word =>
+        word.charAt(0).toUpperCase() +
+        word.slice(1)
+    )
+    .join(' ');
+}
+
+function withinDateRange(
+  timestamp: string,
+  range: DateRange,
+  referenceTime: number
+) {
+  if (range === 'all') {
+    return true;
+  }
+
+  const timestampValue =
+    new Date(timestamp).getTime();
+
+  return (
+    Number.isFinite(timestampValue) &&
+    timestampValue >=
+      referenceTime -
+        RANGE_MILLISECONDS[range]
+  );
+}
+
+function escapeCsvValue(value: CsvValue) {
+  const text =
+    value === null || value === undefined
+      ? ''
+      : String(value);
+
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+function createCsv(
+  columns: string[],
+  rows: CsvRow[]
+) {
+  const header = columns
+    .map(escapeCsvValue)
+    .join(',');
+
+  const body = rows.map(row =>
+    columns
+      .map(column =>
+        escapeCsvValue(row[column])
+      )
+      .join(',')
+  );
+
+  return [header, ...body].join('\r\n');
+}
+
+function downloadCsv(
+  filename: string,
+  contents: string
+) {
+  const blob = new Blob(
+    ['\uFEFF', contents],
+    {
+      type: 'text/csv;charset=utf-8;',
+    }
+  );
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+
+  link.href = url;
+  link.download = filename;
+
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+
+  URL.revokeObjectURL(url);
+}
 
 export default function ReportsPage() {
-  const [reportType, setReportType] = useState('incident_logs');
-  const [dateRange, setDateRange] = useState('7d');
-  const [formatType, setFormatType] = useState('pdf');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedReport, setGeneratedReport] = useState<{name: string, date: string, type: string} | null>(null);
+  const {
+    stations,
+    readings,
+    alerts,
+    dataSource,
+    lastUpdated,
+  } = useStore();
 
-  const handleGenerate = () => {
-    setIsGenerating(true);
-    setGeneratedReport(null);
-    
-    // Simulate generation delay
-    setTimeout(() => {
-      setIsGenerating(false);
-      setGeneratedReport({
-        name: `SkyGuard_${reportType}_${dateRange}.${formatType}`,
-        date: format(new Date(), 'MMM d, yyyy HH:mm'),
-        type: formatType.toUpperCase()
-      });
-    }, 2000);
+  const [reportType, setReportType] =
+    useState<ReportType>(
+      'station_overview'
+    );
+
+  const [dateRange, setDateRange] =
+    useState<DateRange>('7d');
+
+  const [
+    generatedReport,
+    setGeneratedReport,
+  ] = useState<GeneratedReport | null>(
+    null
+  );
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  const prepareReport = (
+    referenceTime: number
+  ): PreparedReport => {
+    const stationNames = new Map(
+      stations.map(station => [
+        station.id,
+        station.name,
+      ])
+    );
+
+    const sourceLabel =
+      dataSource === 'api'
+        ? 'Backend API'
+        : 'Mock fallback';
+
+    if (reportType === 'station_overview') {
+      const columns = [
+        'Station ID',
+        'Station Name',
+        'Region',
+        'Latitude',
+        'Longitude',
+        'Decision Status',
+        'Health Score',
+        'Temperature C',
+        'Pressure hPa',
+        'Humidity Percent',
+        'Observed At',
+        'Data Source',
+      ];
+
+      const rows = stations.map(
+        station => ({
+          'Station ID': station.id,
+          'Station Name': station.name,
+          Region: station.region,
+          Latitude: station.location.lat,
+          Longitude: station.location.lng,
+
+          'Decision Status': humanize(
+            station.status
+          ),
+
+          'Health Score':
+            station.healthScore,
+
+          'Temperature C':
+            station.lastReading.temperature,
+
+          'Pressure hPa':
+            station.lastReading.pressure,
+
+          'Humidity Percent':
+            station.lastReading.humidity,
+
+          'Observed At':
+            station.lastReading.timestamp,
+
+          'Data Source': sourceLabel,
+        })
+      );
+
+      return {
+        columns,
+        rows,
+        filePrefix: 'station_overview',
+      };
+    }
+
+    if (reportType === 'reading_history') {
+      const columns = [
+        'Reading ID',
+        'Station ID',
+        'Station Name',
+        'Timestamp',
+        'Temperature C',
+        'Pressure hPa',
+        'Humidity Percent',
+        'Anomalous',
+        'Data Source',
+      ];
+
+      const rows = Object.values(readings)
+        .flat()
+        .filter(reading =>
+          withinDateRange(
+            reading.timestamp,
+            dateRange,
+            referenceTime
+          )
+        )
+        .sort(
+          (a, b) =>
+            new Date(
+              b.timestamp
+            ).getTime() -
+            new Date(
+              a.timestamp
+            ).getTime()
+        )
+        .map(reading => ({
+          'Reading ID': reading.id,
+          'Station ID': reading.stationId,
+
+          'Station Name':
+            stationNames.get(
+              reading.stationId
+            ) ?? 'Unknown station',
+
+          Timestamp: reading.timestamp,
+
+          'Temperature C':
+            reading.temperature,
+
+          'Pressure hPa':
+            reading.pressure,
+
+          'Humidity Percent':
+            reading.humidity,
+
+          Anomalous:
+            reading.isAnomalous
+              ? 'Yes'
+              : 'No',
+
+          'Data Source': sourceLabel,
+        }));
+
+      return {
+        columns,
+        rows,
+
+        filePrefix:
+          `reading_history_${dateRange}`,
+      };
+    }
+
+    if (reportType === 'alert_logs') {
+      const columns = [
+        'Alert ID',
+        'Station ID',
+        'Station Name',
+        'Timestamp',
+        'Decision',
+        'Severity',
+        'Workflow Status',
+        'Recommended Action',
+        'Data Source',
+      ];
+
+      const rows = alerts
+        .filter(alert =>
+          withinDateRange(
+            alert.timestamp,
+            dateRange,
+            referenceTime
+          )
+        )
+        .sort(
+          (a, b) =>
+            new Date(
+              b.timestamp
+            ).getTime() -
+            new Date(
+              a.timestamp
+            ).getTime()
+        )
+        .map(alert => ({
+          'Alert ID': alert.id,
+          'Station ID': alert.stationId,
+
+          'Station Name':
+            stationNames.get(
+              alert.stationId
+            ) ?? 'Unknown station',
+
+          Timestamp: alert.timestamp,
+
+          Decision: humanize(
+            alert.decision
+          ),
+
+          Severity: humanize(
+            alert.severity
+          ),
+
+          'Workflow Status': humanize(
+            alert.status
+          ),
+
+          'Recommended Action':
+            alert.recommendedAction,
+
+          'Data Source': sourceLabel,
+        }));
+
+      return {
+        columns,
+        rows,
+
+        filePrefix:
+          `alert_logs_${dateRange}`,
+      };
+    }
+
+    const columns = [
+      'Station ID',
+      'Station Name',
+      'Station Health Score',
+      'Sensor ID',
+      'Sensor Type',
+      'Sensor Status',
+      'Last Calibrated Or Updated',
+      'Data Source',
+    ];
+
+    const rows = stations.flatMap(
+      station =>
+        station.sensors.map(sensor => ({
+          'Station ID': station.id,
+          'Station Name': station.name,
+
+          'Station Health Score':
+            station.healthScore,
+
+          'Sensor ID': sensor.id,
+
+          'Sensor Type': humanize(
+            sensor.type
+          ),
+
+          'Sensor Status': humanize(
+            sensor.status
+          ),
+
+          'Last Calibrated Or Updated':
+            sensor.lastCalibrated,
+
+          'Data Source': sourceLabel,
+        }))
+    );
+
+    return {
+      columns,
+      rows,
+      filePrefix: 'sensor_health',
+    };
   };
 
-  const getStartDate = () => {
-    const today = new Date();
-    if (dateRange === '24h') return format(subDays(today, 1), 'yyyy-MM-dd');
-    if (dateRange === '7d') return format(subDays(today, 7), 'yyyy-MM-dd');
-    if (dateRange === '30d') return format(subDays(today, 30), 'yyyy-MM-dd');
-    return format(today, 'yyyy-MM-dd');
+  const generateReport = () => {
+    const generatedAt = new Date();
+
+    const prepared = prepareReport(
+      generatedAt.getTime()
+    );
+
+    if (prepared.rows.length === 0) {
+      setGeneratedReport(null);
+
+      setError(
+        'No records are available for this report and selected time range.'
+      );
+
+      return;
+    }
+
+    const safeTimestamp = generatedAt
+      .toISOString()
+      .replaceAll(':', '-')
+      .replaceAll('.', '-');
+
+    const filename =
+      `SkyGuard_${prepared.filePrefix}_${safeTimestamp}.csv`;
+
+    const csv = createCsv(
+      prepared.columns,
+      prepared.rows
+    );
+
+    downloadCsv(filename, csv);
+
+    setError(null);
+
+    setGeneratedReport({
+      filename,
+      rowCount: prepared.rows.length,
+      generatedAt:
+        generatedAt.toISOString(),
+      columns: prepared.columns,
+      previewRows:
+        prepared.rows.slice(0, 5),
+    });
   };
+
+  const selectedReport =
+    REPORT_OPTIONS[reportType];
+
+  const totalReadings =
+    Object.values(readings).reduce(
+      (
+        total,
+        stationReadings
+      ) =>
+        total +
+        stationReadings.length,
+      0
+    );
 
   return (
     <PageWrapper>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold text-white tracking-tight drop-shadow-md">Reports & Logs</h1>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-white">
+              Reports & Data Export
+            </h1>
+
+            <p className="mt-1 text-sm text-slate-400">
+              Download genuine CSV files
+              from the data currently loaded
+              in SkyGuard.
+            </p>
+          </div>
+
+          <div
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${
+              dataSource === 'api'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                dataSource === 'api'
+                  ? 'bg-emerald-400'
+                  : 'bg-amber-400'
+              }`}
+            />
+
+            {dataSource === 'api'
+              ? 'Backend API data'
+              : 'Mock fallback data'}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Report Configuration */}
-          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/50 rounded-xl p-6 lg:col-span-2 space-y-6 shadow-xl relative overflow-hidden">
-            <div className="absolute -top-20 -left-20 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
-            
-            <div className="flex items-center gap-2 mb-2 relative z-10">
-              <Filter className="h-5 w-5 text-indigo-400" />
-              <h2 className="text-lg font-semibold text-white">Report Configuration</h2>
+        {dataSource !== 'api' && (
+          <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-100">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+
+            Start the backend before
+            exporting if you want live API
+            records. The current export would
+            contain the frontend fallback
+            dataset.
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[
+            {
+              label: 'Stations',
+              value: stations.length,
+            },
+
+            {
+              label: 'Readings loaded',
+              value: totalReadings,
+            },
+
+            {
+              label: 'Alerts loaded',
+              value: alerts.length,
+            },
+
+            {
+              label: 'Sensors tracked',
+
+              value: stations.reduce(
+                (total, station) =>
+                  total +
+                  station.sensors.length,
+                0
+              ),
+            },
+          ].map(item => (
+            <div
+              key={item.label}
+              className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-4 shadow-lg backdrop-blur-md"
+            >
+              <p className="text-xs font-medium text-slate-500">
+                {item.label}
+              </p>
+
+              <p className="mt-2 text-2xl font-bold text-white">
+                {item.value.toLocaleString()}
+              </p>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Report Type</label>
-                  <select 
-                    value={reportType}
-                    onChange={e => setReportType(e.target.value)}
-                    className="w-full bg-slate-950/50 border border-slate-800/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer shadow-inner"
-                  >
-                    <option value="incident_logs">Incident & Alert Logs</option>
-                    <option value="sensor_health">Sensor Maintenance History</option>
-                    <option value="data_quality">Data Quality & Completeness</option>
-                    <option value="engine_accuracy">Dual-Evidence Engine Accuracy</option>
-                  </select>
-                </div>
+          ))}
+        </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-1.5">Time Range</label>
-                  <select 
-                    value={dateRange}
-                    onChange={e => setDateRange(e.target.value)}
-                    className="w-full bg-slate-950/50 border border-slate-800/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer shadow-inner"
-                  >
-                    <option value="24h">Last 24 Hours</option>
-                    <option value="7d">Last 7 Days</option>
-                    <option value="30d">Last 30 Days</option>
-                    <option value="custom">Custom Range...</option>
-                  </select>
-                </div>
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-[0.8fr_1.2fr]">
+          <section className="rounded-2xl border border-slate-800/60 bg-slate-900/40 p-6 shadow-xl backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <Filter className="h-5 w-5 text-indigo-300" />
 
-                <AnimatePresence>
-                  {dateRange === 'custom' && (
-                    <motion.div 
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      className="flex gap-2 overflow-hidden"
-                    >
-                      <input type="date" className="flex-1 bg-slate-950/50 border border-slate-800/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all shadow-inner" />
-                      <span className="text-slate-500 self-center font-medium">to</span>
-                      <input type="date" className="flex-1 bg-slate-950/50 border border-slate-800/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all shadow-inner" />
-                    </motion.div>
+              <h2 className="text-lg font-semibold text-white">
+                Export Configuration
+              </h2>
+            </div>
+
+            <div className="mt-6 space-y-5">
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Report type
+                </label>
+
+                <select
+                  value={reportType}
+                  onChange={event => {
+                    setReportType(
+                      event.target
+                        .value as ReportType
+                    );
+
+                    setGeneratedReport(null);
+                    setError(null);
+                  }}
+                  className="w-full cursor-pointer rounded-lg border border-slate-700/70 bg-slate-950/70 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                >
+                  {Object.entries(
+                    REPORT_OPTIONS
+                  ).map(
+                    ([
+                      value,
+                      option,
+                    ]) => (
+                      <option
+                        key={value}
+                        value={value}
+                      >
+                        {option.label}
+                      </option>
+                    )
                   )}
-                </AnimatePresence>
+                </select>
+
+                <p className="mt-2 text-xs leading-5 text-slate-500">
+                  {selectedReport.description}
+                </p>
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-300 mb-2.5">Export Format</label>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                      <input 
-                        type="radio" 
-                        name="format" 
-                        value="pdf" 
-                        checked={formatType === 'pdf'}
-                        onChange={() => setFormatType('pdf')}
-                        className="text-indigo-500 focus:ring-indigo-500/50 bg-slate-900 border-slate-700 w-4 h-4" 
-                      />
-                      <span className={`text-sm flex items-center gap-1.5 transition-colors ${formatType === 'pdf' ? 'text-indigo-300 font-medium' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                        <FileText className="h-4 w-4" /> PDF Report
-                      </span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                      <input 
-                        type="radio" 
-                        name="format" 
-                        value="csv" 
-                        checked={formatType === 'csv'}
-                        onChange={() => setFormatType('csv')}
-                        className="text-indigo-500 focus:ring-indigo-500/50 bg-slate-900 border-slate-700 w-4 h-4" 
-                      />
-                      <span className={`text-sm flex items-center gap-1.5 transition-colors ${formatType === 'csv' ? 'text-indigo-300 font-medium' : 'text-slate-400 group-hover:text-slate-300'}`}>
-                        <FileSpreadsheet className="h-4 w-4" /> CSV Data
-                      </span>
-                    </label>
-                  </div>
-                </div>
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-300">
+                  Time range
+                </label>
 
-                <div className="bg-slate-950/40 backdrop-blur-sm rounded-xl p-4 border border-slate-800/50 shadow-inner">
-                  <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Report Summary</h3>
-                  <ul className="text-sm text-slate-300 space-y-1.5">
-                    <li className="flex justify-between"><span className="text-slate-500">Period:</span> <span className="font-medium">{getStartDate()} to {format(new Date(), 'yyyy-MM-dd')}</span></li>
-                    <li className="flex justify-between"><span className="text-slate-500">Target:</span> <span className="font-medium">All Stations</span></li>
-                    <li className="flex justify-between items-start gap-4"><span className="text-slate-500 shrink-0">Included:</span> <span className="font-medium text-right text-xs">Metadata, Raw Data, SHAP Explanations</span></li>
-                  </ul>
-                </div>
+                <select
+                  value={dateRange}
+                  onChange={event => {
+                    setDateRange(
+                      event.target
+                        .value as DateRange
+                    );
+
+                    setGeneratedReport(null);
+                    setError(null);
+                  }}
+                  disabled={
+                    reportType ===
+                      'station_overview' ||
+                    reportType ===
+                      'sensor_health'
+                  }
+                  className="w-full cursor-pointer rounded-lg border border-slate-700/70 bg-slate-950/70 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="24h">
+                    Last 24 Hours
+                  </option>
+
+                  <option value="7d">
+                    Last 7 Days
+                  </option>
+
+                  <option value="30d">
+                    Last 30 Days
+                  </option>
+
+                  <option value="all">
+                    All Loaded Records
+                  </option>
+                </select>
+
+                {(reportType ===
+                  'station_overview' ||
+                  reportType ===
+                    'sensor_health') && (
+                  <p className="mt-2 text-xs text-slate-500">
+                    This report represents
+                    the current snapshot, so
+                    a time filter is not
+                    required.
+                  </p>
+                )}
               </div>
-            </div>
 
-            <div className="pt-6 border-t border-slate-800/50 flex justify-end relative z-10">
-              <motion.button 
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600/90 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-600/90 text-white rounded-lg text-sm font-medium transition-all shadow-lg hover:shadow-[0_0_20px_rgba(79,70,229,0.4)] border border-indigo-500/30"
+              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-cyan-200">
+                  <FileSpreadsheet className="h-4 w-4" />
+                  CSV format
+                </div>
+
+                <p className="mt-2 text-xs leading-5 text-slate-400">
+                  The downloaded file can be
+                  opened in Microsoft Excel,
+                  Google Sheets or any text
+                  editor.
+                </p>
+              </div>
+
+              <motion.button
+                whileHover={{
+                  scale: 1.01,
+                }}
+                whileTap={{
+                  scale: 0.99,
+                }}
+                onClick={generateReport}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-indigo-500/30 bg-indigo-600/90 px-5 py-3 text-sm font-semibold text-white shadow-lg transition-colors hover:bg-indigo-500"
               >
-                {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-                {isGenerating ? 'Generating...' : 'Generate Report'}
+                <Download className="h-4 w-4" />
+                Generate & Download CSV
               </motion.button>
             </div>
-          </div>
+          </section>
 
-          {/* Generated Reports / History */}
-          <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/50 rounded-xl p-6 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none translate-x-1/2 -translate-y-1/2" />
-            
-            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2 relative z-10">
-              <CheckCircle className="h-5 w-5 text-emerald-400" /> Recent Reports
-            </h2>
-            
-            <div className="space-y-3 relative z-10">
-              <AnimatePresence>
-                {generatedReport && (
-                  <motion.div 
-                    initial={{ opacity: 0, height: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, height: 'auto', scale: 1 }}
-                    className="bg-indigo-500/10 backdrop-blur-sm border border-indigo-500/30 rounded-lg p-4 flex flex-col gap-3 shadow-[0_0_15px_rgba(99,102,241,0.1)]"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-white truncate max-w-[150px]" title={generatedReport.name}>{generatedReport.name}</p>
-                        <p className="text-xs text-slate-400 mt-1">Generated: {generatedReport.date}</p>
-                      </div>
-                      <span className="text-xs font-bold px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded shadow-[inset_0_0_10px_rgba(99,102,241,0.1)] border border-indigo-500/20">
-                        {generatedReport.type}
-                      </span>
-                    </div>
-                    <motion.button 
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      className="flex items-center justify-center gap-2 w-full py-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-200 rounded-md text-xs font-medium transition-colors border border-indigo-500/30"
-                    >
-                      <Download className="h-3.5 w-3.5" /> Download Now
-                    </motion.button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+          <section className="overflow-hidden rounded-2xl border border-slate-800/60 bg-slate-900/40 shadow-xl backdrop-blur-md">
+            <div className="border-b border-slate-800/60 px-6 py-5">
+              <div className="flex items-center gap-2">
+                <Database className="h-5 w-5 text-cyan-300" />
 
-              {/* Dummy History */}
-              <div className="bg-slate-950/40 backdrop-blur-sm border border-slate-800/80 rounded-lg p-4 flex flex-col gap-3 group hover:bg-slate-900/60 transition-colors">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-white group-hover:text-indigo-200 transition-colors">SkyGuard_sensor_health_30d.pdf</p>
-                    <p className="text-xs text-slate-500 mt-1">Generated: {format(subDays(new Date(), 2), 'MMM d, yyyy HH:mm')}</p>
-                  </div>
-                  <span className="text-xs font-bold px-2 py-1 bg-slate-800/80 text-slate-400 rounded border border-slate-700/50">PDF</span>
-                </div>
-                <button className="flex items-center justify-center gap-2 w-full py-1.5 bg-slate-800/50 hover:bg-slate-700/80 text-slate-300 rounded text-xs font-medium transition-colors border border-slate-700/50 group-hover:border-slate-600/50">
-                  <Download className="h-3.5 w-3.5" /> Download Again
-                </button>
+                <h2 className="text-lg font-semibold text-white">
+                  Export Result
+                </h2>
               </div>
 
-              <div className="bg-slate-950/40 backdrop-blur-sm border border-slate-800/80 rounded-lg p-4 flex flex-col gap-3 group hover:bg-slate-900/60 transition-colors">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-white group-hover:text-indigo-200 transition-colors">SkyGuard_incident_logs_7d.csv</p>
-                    <p className="text-xs text-slate-500 mt-1">Generated: {format(subDays(new Date(), 5), 'MMM d, yyyy HH:mm')}</p>
-                  </div>
-                  <span className="text-xs font-bold px-2 py-1 bg-slate-800/80 text-slate-400 rounded border border-slate-700/50">CSV</span>
-                </div>
-                <button className="flex items-center justify-center gap-2 w-full py-1.5 bg-slate-800/50 hover:bg-slate-700/80 text-slate-300 rounded text-xs font-medium transition-colors border border-slate-700/50 group-hover:border-slate-600/50">
-                  <Download className="h-3.5 w-3.5" /> Download Again
-                </button>
-              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Last API refresh:{' '}
+
+                {lastUpdated
+                  ? new Date(
+                      lastUpdated
+                    ).toISOString()
+                  : 'Not available'}
+              </p>
             </div>
-          </div>
 
+            <div className="p-6">
+              {error && (
+                <div className="flex items-start gap-3 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              {!error &&
+                !generatedReport && (
+                  <div className="flex min-h-64 flex-col items-center justify-center text-center">
+                    <FileSpreadsheet className="h-12 w-12 text-slate-700" />
+
+                    <p className="mt-4 text-sm font-medium text-slate-300">
+                      Choose a report and
+                      generate your CSV.
+                    </p>
+
+                    <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">
+                      The file is created
+                      locally in your browser.
+                      No report is uploaded to
+                      another service.
+                    </p>
+                  </div>
+                )}
+
+              {!error &&
+                generatedReport && (
+                  <div className="space-y-5">
+                    <div className="flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                      <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-300" />
+
+                      <div className="min-w-0">
+                        <p className="font-medium text-emerald-100">
+                          CSV downloaded
+                          successfully
+                        </p>
+
+                        <p className="mt-1 break-all text-xs text-slate-400">
+                          {
+                            generatedReport.filename
+                          }
+                        </p>
+
+                        <p className="mt-1 text-xs text-slate-500">
+                          {generatedReport.rowCount.toLocaleString()}{' '}
+                          data rows ·{' '}
+                          {
+                            generatedReport.generatedAt
+                          }
+                        </p>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                        First{' '}
+                        {
+                          generatedReport
+                            .previewRows
+                            .length
+                        }{' '}
+                        rows
+                      </h3>
+
+                      <div className="overflow-x-auto rounded-xl border border-slate-800/70">
+                        <table className="min-w-full text-left text-xs">
+                          <thead className="bg-slate-950/70">
+                            <tr>
+                              {generatedReport.columns.map(
+                                column => (
+                                  <th
+                                    key={
+                                      column
+                                    }
+                                    className="whitespace-nowrap px-3 py-2.5 font-semibold text-slate-300"
+                                  >
+                                    {
+                                      column
+                                    }
+                                  </th>
+                                )
+                              )}
+                            </tr>
+                          </thead>
+
+                          <tbody>
+                            {generatedReport.previewRows.map(
+                              (
+                                row,
+                                rowIndex
+                              ) => (
+                                <tr
+                                  key={
+                                    rowIndex
+                                  }
+                                  className="border-t border-slate-800/60"
+                                >
+                                  {generatedReport.columns.map(
+                                    column => (
+                                      <td
+                                        key={
+                                          column
+                                        }
+                                        className="max-w-64 truncate whitespace-nowrap px-3 py-2.5 text-slate-400"
+                                        title={String(
+                                          row[
+                                            column
+                                          ] ?? ''
+                                        )}
+                                      >
+                                        {String(
+                                          row[
+                                            column
+                                          ] ?? ''
+                                        )}
+                                      </td>
+                                    )
+                                  )}
+                                </tr>
+                              )
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+            </div>
+          </section>
         </div>
       </div>
     </PageWrapper>
