@@ -181,9 +181,12 @@ export default function Dashboard() {
                           </span>
                           <span className="text-sm font-medium text-slate-200 group-hover:text-white transition-colors">{station?.name || alert.stationId}</span>
                         </div>
-                        <span className="text-xs font-medium text-slate-500">
-                          {formatDistanceToNow(new Date(alert.timestamp), { addSuffix: true })}
-                        </span>
+                        <span
+                  suppressHydrationWarning
+  className="text-xs font-medium text-slate-500"
+>
+                    {formatDistanceToNow(new Date(alert.timestamp), { addSuffix: true })}
+                      </span>
                       </div>
                       <p className="text-sm text-slate-400 line-clamp-1 group-hover:text-slate-300 transition-colors">{alert.recommendedAction}</p>
                     </Link>
