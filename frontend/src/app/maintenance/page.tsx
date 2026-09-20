@@ -1,261 +1,804 @@
 'use client';
 
-import { useStore } from '@/store/useStore';
 import { useState } from 'react';
-import { Wrench, Calendar, CheckCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  Calendar,
+  CheckCircle2,
+  Info,
+  Wrench,
+  X,
+} from 'lucide-react';
 import { format } from 'date-fns';
-import { motion, AnimatePresence } from 'framer-motion';
+import {
+  AnimatePresence,
+  motion,
+} from 'framer-motion';
 import { PageWrapper } from '@/components/layout/PageWrapper';
+import { useStore } from '@/store/useStore';
+import type { Sensor } from '@/store/mockData';
+
+type SensorFilter =
+  | Sensor['status']
+  | 'all';
+
+interface SelectedSensor {
+  stationId: string;
+  stationName: string;
+  sensorId: string;
+  sensorType: Sensor['type'];
+}
+
+interface MaintenanceEntry
+  extends SelectedSensor {
+  id: string;
+  date: string;
+  notes: string;
+}
 
 export default function MaintenancePage() {
-  const { stations, scheduleMaintenance } = useStore();
-  const [statusFilter, setStatusFilter] = useState('all');
-  
-  const [showScheduleForm, setShowScheduleForm] = useState(false);
-  const [selectedSensorInfo, setSelectedSensorInfo] = useState<{stationId: string, sensorId: string} | null>(null);
-  const [scheduleDate, setScheduleDate] = useState('');
-  const [scheduleNotes, setScheduleNotes] = useState('');
-  const [showToast, setShowToast] = useState('');
+  const {
+    stations,
+    dataSource,
+  } = useStore();
 
-  const allSensors = stations.flatMap(st => 
-    st.sensors.map(s => ({
-      ...s,
-      stationId: st.id,
-      stationName: st.name
-    }))
+  const [
+    statusFilter,
+    setStatusFilter,
+  ] = useState<SensorFilter>('all');
+
+  const [
+    selectedSensor,
+    setSelectedSensor,
+  ] = useState<SelectedSensor | null>(
+    null
   );
 
-  const filteredSensors = allSensors.filter(s => {
-    if (statusFilter !== 'all' && s.status !== statusFilter) return false;
-    return true;
-  });
+  const [
+    scheduleDate,
+    setScheduleDate,
+  ] = useState('');
 
-  const getSensorColor = (status: string) => {
+  const [
+    scheduleNotes,
+    setScheduleNotes,
+  ] = useState('');
+
+  const [
+    maintenanceEntries,
+    setMaintenanceEntries,
+  ] = useState<MaintenanceEntry[]>([]);
+
+  const [toast, setToast] =
+    useState<string | null>(null);
+
+  const scheduledSensorIds = new Set(
+    maintenanceEntries.map(
+      entry => entry.sensorId
+    )
+  );
+
+  const allSensors = stations.flatMap(
+    station =>
+      station.sensors.map(sensor => ({
+        ...sensor,
+
+        status:
+          scheduledSensorIds.has(
+            sensor.id
+          )
+            ? ('scheduled' as const)
+            : sensor.status,
+
+        stationId: station.id,
+        stationName: station.name,
+      }))
+  );
+
+  const filteredSensors =
+    allSensors.filter(
+      sensor =>
+        statusFilter === 'all' ||
+        sensor.status === statusFilter
+    );
+
+  const statusCounts = {
+    ok: allSensors.filter(
+      sensor => sensor.status === 'ok'
+    ).length,
+
+    degraded: allSensors.filter(
+      sensor =>
+        sensor.status === 'degraded'
+    ).length,
+
+    faulty: allSensors.filter(
+      sensor =>
+        sensor.status === 'faulty'
+    ).length,
+
+    scheduled: allSensors.filter(
+      sensor =>
+        sensor.status === 'scheduled'
+    ).length,
+  };
+
+  const getSensorColor = (
+    status: Sensor['status']
+  ) => {
     switch (status) {
-      case 'ok': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[inset_0_0_12px_rgba(16,185,129,0.05)]';
-      case 'degraded': return 'bg-amber-500/10 text-amber-400 border-amber-500/20 shadow-[inset_0_0_12px_rgba(245,158,11,0.05)]';
-      case 'faulty': return 'bg-red-500/10 text-red-400 border-red-500/20 shadow-[inset_0_0_12px_rgba(239,68,68,0.05)]';
-      case 'scheduled': return 'bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-[inset_0_0_12px_rgba(59,130,246,0.05)]';
-      default: return 'bg-slate-500/10 text-slate-400 border-slate-500/20 shadow-[inset_0_0_12px_rgba(100,116,139,0.05)]';
+      case 'ok':
+        return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400';
+
+      case 'degraded':
+        return 'border-amber-500/20 bg-amber-500/10 text-amber-400';
+
+      case 'faulty':
+        return 'border-red-500/20 bg-red-500/10 text-red-400';
+
+      case 'scheduled':
+        return 'border-blue-500/20 bg-blue-500/10 text-blue-400';
     }
   };
 
-  const getSuggestedCorrection = (status: string) => {
-    if (status === 'ok') return 'None';
-    if (status === 'scheduled') return 'Maintenance scheduled';
-    if (status === 'degraded') return 'Recalibrate sensor';
-    return 'Replace sensor unit immediately';
-  };
+  const getSuggestedCorrection = (
+    status: Sensor['status']
+  ) => {
+    switch (status) {
+      case 'ok':
+        return 'No action required';
 
-  const handleOpenScheduleForm = (stationId: string, sensorId: string) => {
-  setSelectedSensorInfo({ stationId, sensorId });
+      case 'scheduled':
+        return 'Maintenance added to session planner';
 
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  setScheduleDate(tomorrow.toISOString().split('T')[0]);
+      case 'degraded':
+        return 'Inspect and recalibrate sensor';
 
-  setScheduleNotes('');
-  setShowScheduleForm(true);
-};
-
-  const handleScheduleSubmit = () => {
-    if (selectedSensorInfo && scheduleDate) {
-      scheduleMaintenance(selectedSensorInfo.stationId, selectedSensorInfo.sensorId, new Date(scheduleDate).toISOString(), scheduleNotes);
-      setShowScheduleForm(false);
-      setShowToast(`Maintenance scheduled for sensor ${selectedSensorInfo.sensorId}`);
-      setTimeout(() => setShowToast(''), 3000);
+      case 'faulty':
+        return 'Inspect wiring and replace sensor if required';
     }
   };
 
-  const maintenanceLog = allSensors
-    .filter(s => s.status === 'scheduled')
-    .map(s => ({
-      stationName: s.stationName,
-      sensorType: s.type,
-      date: scheduleDate
-  ? format(new Date(`${scheduleDate}T00:00:00`), 'MMM d, yyyy')
-  : 'Date pending',
-notes: scheduleNotes || 'Scheduled via Dashboard'
-    }));
+  const openScheduleForm = (
+    sensor: (typeof allSensors)[number]
+  ) => {
+    const tomorrow = new Date();
+
+    tomorrow.setDate(
+      tomorrow.getDate() + 1
+    );
+
+    const localDate = [
+      tomorrow.getFullYear(),
+
+      String(
+        tomorrow.getMonth() + 1
+      ).padStart(2, '0'),
+
+      String(
+        tomorrow.getDate()
+      ).padStart(2, '0'),
+    ].join('-');
+
+    setSelectedSensor({
+      stationId: sensor.stationId,
+      stationName:
+        sensor.stationName,
+      sensorId: sensor.id,
+      sensorType: sensor.type,
+    });
+
+    setScheduleDate(localDate);
+    setScheduleNotes('');
+  };
+
+  const closeScheduleForm = () => {
+    setSelectedSensor(null);
+    setScheduleDate('');
+    setScheduleNotes('');
+  };
+
+  const scheduleMaintenance = () => {
+    if (
+      !selectedSensor ||
+      !scheduleDate
+    ) {
+      return;
+    }
+
+    const entry: MaintenanceEntry = {
+      ...selectedSensor,
+
+      id:
+        `${selectedSensor.sensorId}-${scheduleDate}`,
+
+      date: scheduleDate,
+
+      notes:
+        scheduleNotes.trim() ||
+        'No additional notes provided.',
+    };
+
+    setMaintenanceEntries(
+      current => [
+        entry,
+        ...current,
+      ]
+    );
+
+    setToast(
+      `Maintenance added for ${selectedSensor.stationName} (${selectedSensor.sensorType}).`
+    );
+
+    closeScheduleForm();
+
+    setTimeout(() => {
+      setToast(null);
+    }, 3500);
+  };
+
+  const removeMaintenanceEntry = (
+    entryId: string
+  ) => {
+    setMaintenanceEntries(
+      current =>
+        current.filter(
+          entry =>
+            entry.id !== entryId
+        )
+    );
+  };
 
   return (
     <PageWrapper>
-      <div className="space-y-6 relative">
-        {/* Toast Notification */}
+      <div className="relative space-y-6">
         <AnimatePresence>
-          {showToast && (
-            <motion.div 
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="fixed top-4 right-4 bg-emerald-500/20 backdrop-blur-md border border-emerald-500/30 text-emerald-100 px-4 py-3 rounded-lg shadow-[0_0_20px_rgba(16,185,129,0.2)] z-50 flex items-center gap-3"
+          {toast && (
+            <motion.div
+              initial={{
+                opacity: 0,
+                y: -16,
+                scale: 0.97,
+              }}
+              animate={{
+                opacity: 1,
+                y: 0,
+                scale: 1,
+              }}
+              exit={{
+                opacity: 0,
+                y: -16,
+                scale: 0.97,
+              }}
+              className="fixed right-4 top-4 z-50 flex max-w-md items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-950/90 px-4 py-3 text-emerald-100 shadow-2xl backdrop-blur-xl"
             >
-              <CheckCircle className="h-5 w-5 text-emerald-400" />
-              <span className="text-sm font-medium">{showToast}</span>
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-300" />
+
+              <span className="text-sm font-medium">
+                {toast}
+              </span>
             </motion.div>
           )}
         </AnimatePresence>
 
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <h1 className="text-3xl font-bold text-white tracking-tight drop-shadow-md">Sensor Health & Maintenance</h1>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-white">
+              Sensor Health &
+              Maintenance
+            </h1>
+
+            <p className="mt-1 text-sm text-slate-400">
+              Live sensor health with a
+              browser-session maintenance
+              planner.
+            </p>
+          </div>
+
+          <div
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${
+              dataSource === 'api'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                dataSource === 'api'
+                  ? 'bg-emerald-400'
+                  : 'bg-amber-400'
+              }`}
+            />
+
+            {dataSource === 'api'
+              ? 'Backend health data'
+              : 'Mock fallback data'}
+          </div>
         </div>
 
-        <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/50 rounded-xl p-4 flex gap-4 shadow-md">
+        <div className="flex items-start gap-3 rounded-xl border border-blue-500/20 bg-blue-500/5 px-4 py-3">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
+
+          <div>
+            <p className="text-sm font-medium text-blue-100">
+              Prototype scheduling mode
+            </p>
+
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              Sensor health comes from the
+              backend. Maintenance dates and
+              notes are stored only in this
+              browser session and reset when
+              the page reloads. Backend
+              work-order persistence is a
+              future deployment feature.
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {[
+            {
+              label: 'Healthy',
+              value: statusCounts.ok,
+              color:
+                'text-emerald-300',
+            },
+
+            {
+              label: 'Degraded',
+              value:
+                statusCounts.degraded,
+              color:
+                'text-amber-300',
+            },
+
+            {
+              label: 'Faulty',
+              value:
+                statusCounts.faulty,
+              color:
+                'text-red-300',
+            },
+
+            {
+              label:
+                'Session scheduled',
+
+              value:
+                statusCounts.scheduled,
+
+              color:
+                'text-blue-300',
+            },
+          ].map(item => (
+            <div
+              key={item.label}
+              className="rounded-xl border border-slate-800/60 bg-slate-900/40 p-4 shadow-lg backdrop-blur-md"
+            >
+              <p className="text-xs font-medium text-slate-500">
+                {item.label}
+              </p>
+
+              <p
+                className={`mt-2 text-2xl font-bold ${item.color}`}
+              >
+                {item.value}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="rounded-xl border border-slate-800/50 bg-slate-900/40 p-4 shadow-md backdrop-blur-md">
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-slate-950/50 border border-slate-800/80 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all cursor-pointer"
+            onChange={event =>
+              setStatusFilter(
+                event.target
+                  .value as SensorFilter
+              )
+            }
+            className="cursor-pointer rounded-lg border border-slate-800/80 bg-slate-950/50 px-4 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
           >
-            <option value="all">All Statuses</option>
-            <option value="ok">OK</option>
-            <option value="degraded">Degraded</option>
-            <option value="faulty">Faulty</option>
-            <option value="scheduled">Scheduled</option>
+            <option value="all">
+              All Statuses
+            </option>
+
+            <option value="ok">
+              Healthy
+            </option>
+
+            <option value="degraded">
+              Degraded
+            </option>
+
+            <option value="faulty">
+              Faulty
+            </option>
+
+            <option value="scheduled">
+              Session Scheduled
+            </option>
           </select>
         </div>
 
-        <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/50 rounded-xl overflow-hidden shadow-xl">
+        <div className="overflow-hidden rounded-xl border border-slate-800/50 bg-slate-900/40 shadow-xl backdrop-blur-md">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm whitespace-nowrap">
-              <thead className="bg-slate-950/30 text-slate-300 border-b border-slate-800/50">
+            <table className="w-full min-w-[960px] whitespace-nowrap text-left text-sm">
+              <thead className="border-b border-slate-800/50 bg-slate-950/30 text-slate-300">
                 <tr>
-                  <th className="px-6 py-4 font-semibold">Station</th>
-                  <th className="px-6 py-4 font-semibold">Sensor Type</th>
-                  <th className="px-6 py-4 font-semibold">Status</th>
-                  <th className="px-6 py-4 font-semibold">Last Calibrated</th>
-                  <th className="px-6 py-4 font-semibold">Suggested Correction</th>
-                  <th className="px-6 py-4 font-semibold text-right">Actions</th>
+                  <th className="px-6 py-4 font-semibold">
+                    Station
+                  </th>
+
+                  <th className="px-6 py-4 font-semibold">
+                    Sensor Type
+                  </th>
+
+                  <th className="px-6 py-4 font-semibold">
+                    Status
+                  </th>
+
+                  <th className="px-6 py-4 font-semibold">
+                    Last Calibrated /
+                    Updated
+                  </th>
+
+                  <th className="px-6 py-4 font-semibold">
+                    Suggested Action
+                  </th>
+
+                  <th className="px-6 py-4 text-right font-semibold">
+                    Action
+                  </th>
                 </tr>
               </thead>
+
               <tbody>
                 <AnimatePresence>
-                  {filteredSensors.map((sensor, i) => (
-                    <motion.tr 
-                      key={`${sensor.stationId}-${sensor.id}`}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ delay: i * 0.05 }}
-                      className="border-b border-slate-800/30 hover:bg-slate-800/40 transition-colors group"
-                    >
-                      <td className="px-6 py-4 text-white font-medium group-hover:text-indigo-200 transition-colors">{sensor.stationName}</td>
-                      <td className="px-6 py-4 text-slate-300 capitalize">{sensor.type}</td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${getSensorColor(sensor.status)} uppercase inline-block group-hover:scale-105 transition-transform`}>
-                          {sensor.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-slate-400">{sensor.lastCalibrated}</td>
-                      <td className="px-6 py-4 text-slate-300">{getSuggestedCorrection(sensor.status)}</td>
-                      <td className="px-6 py-4 text-right">
-                        {sensor.status !== 'ok' && sensor.status !== 'scheduled' ? (
-                          <button 
-                            onClick={() => handleOpenScheduleForm(sensor.stationId, sensor.id)}
-                            className="inline-flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 hover:bg-slate-700 text-white rounded-md text-xs font-medium transition-all shadow-md hover:shadow-[0_0_15px_rgba(255,255,255,0.05)] border border-slate-700/50"
+                  {filteredSensors.map(
+                    (
+                      sensor,
+                      index
+                    ) => (
+                      <motion.tr
+                        key={`${sensor.stationId}-${sensor.id}`}
+                        initial={{
+                          opacity: 0,
+                          y: 8,
+                        }}
+                        animate={{
+                          opacity: 1,
+                          y: 0,
+                        }}
+                        exit={{
+                          opacity: 0,
+                        }}
+                        transition={{
+                          delay:
+                            index *
+                            0.03,
+                        }}
+                        className="group border-b border-slate-800/30 transition-colors hover:bg-slate-800/40"
+                      >
+                        <td className="px-6 py-4 font-medium text-white group-hover:text-indigo-200">
+                          <p>
+                            {
+                              sensor.stationName
+                            }
+                          </p>
+
+                          <p className="mt-1 text-xs font-normal text-slate-500">
+                            {
+                              sensor.stationId
+                            }
+                          </p>
+                        </td>
+
+                        <td className="px-6 py-4 capitalize text-slate-300">
+                          {
+                            sensor.type
+                          }
+                        </td>
+
+                        <td className="px-6 py-4">
+                          <span
+                            className={`inline-block rounded-full border px-2.5 py-1 text-xs font-semibold uppercase ${getSensorColor(
+                              sensor.status
+                            )}`}
                           >
-                            <Calendar className="h-3.5 w-3.5" /> Schedule Maintenance
-                          </button>
-                        ) : (
-                          <span className="text-slate-500 text-xs px-3 font-medium">No action needed</span>
-                        )}
-                      </td>
-                    </motion.tr>
-                  ))}
+                            {
+                              sensor.status
+                            }
+                          </span>
+                        </td>
+
+                        <td className="px-6 py-4 text-slate-400">
+                          {
+                            sensor.lastCalibrated
+                          }
+                        </td>
+
+                        <td className="px-6 py-4 text-slate-300">
+                          {getSuggestedCorrection(
+                            sensor.status
+                          )}
+                        </td>
+
+                        <td className="px-6 py-4 text-right">
+                          {sensor.status ===
+                            'degraded' ||
+                          sensor.status ===
+                            'faulty' ? (
+                            <button
+                              onClick={() =>
+                                openScheduleForm(
+                                  sensor
+                                )
+                              }
+                              className="inline-flex items-center gap-2 rounded-md border border-slate-700/50 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-slate-700"
+                            >
+                              <Calendar className="h-3.5 w-3.5" />
+
+                              Add to
+                              Planner
+                            </button>
+                          ) : (
+                            <span className="px-3 text-xs font-medium text-slate-500">
+                              {sensor.status ===
+                              'scheduled'
+                                ? 'Added to planner'
+                                : 'No action required'}
+                            </span>
+                          )}
+                        </td>
+                      </motion.tr>
+                    )
+                  )}
                 </AnimatePresence>
               </tbody>
             </table>
           </div>
+
+          {filteredSensors.length ===
+            0 && (
+            <div className="p-10 text-center text-sm text-slate-500">
+              No sensors match this status
+              filter.
+            </div>
+          )}
         </div>
 
-        {/* Maintenance Log */}
-        <div className="bg-slate-900/40 backdrop-blur-md border border-slate-800/50 rounded-xl p-6 shadow-xl">
-          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <Wrench className="h-5 w-5 text-indigo-400" /> Maintenance Log
+        <section className="rounded-xl border border-slate-800/50 bg-slate-900/40 p-6 shadow-xl backdrop-blur-md">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
+            <Wrench className="h-5 w-5 text-indigo-400" />
+
+            Session Maintenance Planner
           </h2>
-          <div className="space-y-3">
+
+          <div className="mt-4 space-y-3">
             <AnimatePresence>
-              {maintenanceLog.map((log, i) => (
-                <motion.div 
-                  key={i}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: i * 0.1 }}
-                  className="bg-slate-950/40 backdrop-blur-sm border border-slate-800/80 rounded-lg p-4 flex justify-between items-center hover:bg-slate-900/60 transition-colors shadow-sm"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-white">{log.stationName} - <span className="capitalize">{log.sensorType}</span></p>
-                    <p className="text-xs text-slate-400 mt-1">{log.notes}</p>
-                  </div>
-                  <div className="text-sm text-indigo-400 font-medium bg-indigo-500/10 px-3 py-1 rounded-md border border-indigo-500/20 shadow-[inset_0_0_10px_rgba(99,102,241,0.1)]">
-                    {log.date}
-                  </div>
-                </motion.div>
-              ))}
+              {maintenanceEntries.map(
+                entry => (
+                  <motion.div
+                    key={entry.id}
+                    initial={{
+                      opacity: 0,
+                      x: -8,
+                    }}
+                    animate={{
+                      opacity: 1,
+                      x: 0,
+                    }}
+                    exit={{
+                      opacity: 0,
+                      x: 8,
+                    }}
+                    className="flex flex-col gap-4 rounded-xl border border-slate-800/80 bg-slate-950/40 p-4 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-white">
+                        {
+                          entry.stationName
+                        }{' '}
+                        ·{' '}
+
+                        <span className="capitalize">
+                          {
+                            entry.sensorType
+                          }
+                        </span>
+                      </p>
+
+                      <p className="mt-1 text-xs text-slate-500">
+                        {
+                          entry.sensorId
+                        }
+                      </p>
+
+                      <p className="mt-2 text-xs text-slate-400">
+                        {entry.notes}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-md border border-indigo-500/20 bg-indigo-500/10 px-3 py-1.5 text-xs font-medium text-indigo-300">
+                        {format(
+                          new Date(
+                            `${entry.date}T00:00:00`
+                          ),
+
+                          'MMM d, yyyy'
+                        )}
+                      </span>
+
+                      <button
+                        onClick={() =>
+                          removeMaintenanceEntry(
+                            entry.id
+                          )
+                        }
+                        aria-label={`Remove maintenance for ${entry.sensorId}`}
+                        className="rounded-md border border-red-500/20 bg-red-500/5 p-1.5 text-red-300 transition-colors hover:bg-red-500/15"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </motion.div>
+                )
+              )}
             </AnimatePresence>
-            {maintenanceLog.length === 0 && (
-              <p className="text-sm text-slate-500 text-center py-6 font-medium">No upcoming maintenance scheduled.</p>
+
+            {maintenanceEntries.length ===
+              0 && (
+              <div className="py-8 text-center">
+                <Wrench className="mx-auto h-8 w-8 text-slate-700" />
+
+                <p className="mt-3 text-sm font-medium text-slate-400">
+                  No maintenance added
+                  during this session.
+                </p>
+              </div>
             )}
           </div>
-        </div>
+        </section>
 
-        {/* Schedule Modal */}
         <AnimatePresence>
-          {showScheduleForm && (
-            <motion.div 
+          {selectedSensor && (
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-md"
             >
-              <motion.div 
-                initial={{ scale: 0.95, opacity: 0, y: 20 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                exit={{ scale: 0.95, opacity: 0, y: 20 }}
-                className="bg-slate-900 border border-slate-700/50 rounded-xl p-6 w-full max-w-md shadow-[0_0_40px_rgba(0,0,0,0.5)] relative overflow-hidden"
+              <motion.div
+                initial={{
+                  scale: 0.96,
+                  opacity: 0,
+                  y: 16,
+                }}
+                animate={{
+                  scale: 1,
+                  opacity: 1,
+                  y: 0,
+                }}
+                exit={{
+                  scale: 0.96,
+                  opacity: 0,
+                  y: 16,
+                }}
+                className="w-full max-w-md rounded-2xl border border-slate-700/60 bg-slate-900 p-6 shadow-2xl"
               >
-                {/* Decorative gradients */}
-                <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
-                <div className="absolute bottom-0 left-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl translate-y-1/2 -translate-x-1/3 pointer-events-none" />
-                
-                <h3 className="text-xl font-bold text-white mb-6 relative">Schedule Maintenance</h3>
-                <div className="space-y-5 relative">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1.5">Target Sensor</label>
-                    <div className="w-full bg-slate-950/50 border border-slate-800/80 rounded-lg px-3 py-2.5 text-sm text-slate-300 shadow-inner">
-                      {selectedSensorInfo?.sensorId} ({selectedSensorInfo?.stationId})
+                    <h3 className="text-xl font-bold text-white">
+                      Add to Maintenance
+                      Planner
+                    </h3>
+
+                    <p className="mt-1 text-xs text-slate-500">
+                      Session-only workflow
+                      record
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={
+                      closeScheduleForm
+                    }
+                    aria-label="Close maintenance form"
+                    className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-white"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <div className="mt-6 space-y-5">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                      Target sensor
+                    </label>
+
+                    <div className="rounded-lg border border-slate-800/80 bg-slate-950/50 px-3 py-2.5 text-sm text-slate-300">
+                      {
+                        selectedSensor.sensorId
+                      }{' '}
+                      ·{' '}
+                      {
+                        selectedSensor.stationName
+                      }
                     </div>
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1.5">Date</label>
-                    <input 
+                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                      Planned date
+                    </label>
+
+                    <input
                       type="date"
-                      value={scheduleDate}
-                      onChange={e => setScheduleDate(e.target.value)}
-                      className="w-full bg-slate-950/50 border border-slate-700/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all shadow-inner"
+                      value={
+                        scheduleDate
+                      }
+                      onChange={event =>
+                        setScheduleDate(
+                          event.target
+                            .value
+                        )
+                      }
+                      className="w-full rounded-lg border border-slate-700/80 bg-slate-950/50 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                     />
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1.5">Notes</label>
-                    <textarea 
-                      value={scheduleNotes}
-                      onChange={e => setScheduleNotes(e.target.value)}
+                    <label className="mb-1.5 block text-sm font-medium text-slate-300">
+                      Notes
+                    </label>
+
+                    <textarea
+                      value={
+                        scheduleNotes
+                      }
+                      onChange={event =>
+                        setScheduleNotes(
+                          event.target
+                            .value
+                        )
+                      }
                       rows={3}
-                      className="w-full bg-slate-950/50 border border-slate-700/80 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all shadow-inner resize-none"
-                      placeholder="Technician details, parts required..."
+                      className="w-full resize-none rounded-lg border border-slate-700/80 bg-slate-950/50 px-3 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                      placeholder="Inspection details or required parts..."
                     />
                   </div>
-                  <div className="flex justify-end gap-3 pt-4">
-                    <button 
-                      onClick={() => setShowScheduleForm(false)} 
-                      className="px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-white transition-colors"
+
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs leading-5 text-amber-100/80">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" />
+
+                    This planning entry will
+                    not be written to the
+                    backend database.
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      onClick={
+                        closeScheduleForm
+                      }
+                      className="px-4 py-2.5 text-sm font-medium text-slate-400 hover:text-white"
                     >
                       Cancel
                     </button>
-                    <button 
-                      onClick={handleScheduleSubmit}
-                      className="px-5 py-2.5 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium transition-all shadow-lg hover:shadow-[0_0_20px_rgba(79,70,229,0.4)]"
+
+                    <button
+                      onClick={
+                        scheduleMaintenance
+                      }
+                      disabled={
+                        !scheduleDate
+                      }
+                      className="rounded-lg bg-indigo-600/90 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Confirm Booking
+                      Add for This Session
                     </button>
                   </div>
                 </div>

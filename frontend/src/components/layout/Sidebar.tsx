@@ -11,13 +11,18 @@ import {
   Settings,
   Wrench,
 } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
+import {
+  clsx,
+  type ClassValue,
+} from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import logo from '@/app/skyguardlogo.svg';
 import DashboardSvg from '@/app/Dashboard.svg';
 import MapSvg from '@/app/stations-map.svg';
 
-export function cn(...inputs: ClassValue[]) {
+export function cn(
+  ...inputs: ClassValue[]
+) {
   return twMerge(clsx(inputs));
 }
 
@@ -82,7 +87,7 @@ const navItems = [
     icon: FileText,
   },
   {
-    name: 'Settings',
+    name: 'System Status',
     href: '/settings',
     icon: Settings,
   },
@@ -107,7 +112,9 @@ export function Sidebar() {
           {navItems.map(item => {
             const isActive =
               pathname === item.href ||
-              (pathname.startsWith(item.href) &&
+              (pathname.startsWith(
+                item.href
+              ) &&
                 item.href !== '/');
 
             return (
@@ -118,6 +125,7 @@ export function Sidebar() {
                   isActive
                     ? 'border border-indigo-500/20 bg-indigo-500/10 text-indigo-400 shadow-[inset_0_0_12px_rgba(99,102,241,0.1)]'
                     : 'border border-transparent text-slate-400 hover:border-slate-700/50 hover:bg-slate-800/40 hover:text-white',
+
                   'group flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200'
                 )}
               >
@@ -126,6 +134,7 @@ export function Sidebar() {
                     isActive
                       ? 'text-indigo-400'
                       : 'text-slate-500 group-hover:text-indigo-300',
+
                     'mr-3 h-5 w-5 flex-shrink-0 transition-colors'
                   )}
                   aria-hidden="true"
