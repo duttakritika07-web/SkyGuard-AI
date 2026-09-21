@@ -110,17 +110,28 @@ class DemoScenarioResponse(BaseModel):
 
 
 class ModelInfoResponse(BaseModel):
+    model_source: str
     anomaly_detector: str
     classifier: str
     explainability: str
     training_source: str
+    evaluation_note: str
+    fallback_active: bool
+    model_load_warning: str | None = None
+
     feature_names: list[str]
+
     holdout_accuracy: float
     holdout_macro_f1: float
     labels: list[str]
     confusion_matrix: list[list[int]]
+
     training_rows: int
     test_rows: int
+
+    real_training_rows: int = 0
+    real_test_rows: int = 0
+    metric_scope: str | None = None
 
 
 class HealthResponse(BaseModel):
