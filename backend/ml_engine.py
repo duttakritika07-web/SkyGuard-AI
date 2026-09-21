@@ -1,9 +1,10 @@
 """Hybrid ML + rules + spatial evidence engine for SkyGuard AI.
 
-This is a hackathon prototype, not an operational forecasting system. The
-Random Forest is trained on physics-guided synthetic patterns so that the full
-pipeline can be demonstrated offline. Replace or augment that training data
-with validated historical AWS observations before any real deployment.
+The engine prefers a validated model artifact trained with historical NOAA
+observations and controlled transformations. If that artifact is unavailable
+or invalid, it safely falls back to the original physics-guided synthetic
+prototype model. This remains a hackathon prototype, not an operational
+forecasting system.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from sklearn.model_selection import train_test_split
 
 from config import HISTORY_SIZE, MODEL_RANDOM_STATE, SPATIAL_WINDOW_MINUTES
+from noaa_model_runtime import load_noaa_models
 from schemas import AWSReadingInput
 from seed import NEIGHBOR_MAP
 
@@ -96,17 +98,57 @@ class DualEvidenceEngine:
         )
         self.latest: dict[str, Observation] = {}
         self.classifier: RandomForestClassifier | None = None
-        self.anomaly_detector: IsolationForest | None = None
+        self.anomaly_detector: Any | None = None
         self.shap_explainer: shap.TreeExplainer | None = None
         self.iso_low = -0.1
         self.iso_high = 0.1
         self.metrics: dict[str, Any] = {}
+        self.model_source = "synthetic_fallback"
+        self.anomaly_description = (
+            "Isolation Forest trained on normal synthetic patterns"
+        )
+        self.classifier_description = (
+            "Random Forest trained on physics-guided synthetic patterns"
+        )
+        self.training_source = (
+            "Physics-guided synthetic prototype data. This fallback is used "
+            "only if the trained NOAA artifact cannot be loaded."
+        )
+        self.evaluation_note = (
+            "Synthetic fallback metrics are prototype checks and are not "
+            "real-world accuracy."
+        )
+        self.model_load_warning: str | None = None
         self.ready = False
 
     def initialize(self) -> None:
         if self.ready:
             return
 
+        # Prefer the historical NOAA model. Any loading, validation or SHAP
+        # failure leaves the existing synthetic engine available as fallback.
+        try:
+            noaa_models = load_noaa_models()
+            noaa_explainer = shap.TreeExplainer(noaa_models.classifier)
+        except Exception as exc:
+            self.model_load_warning = f"{type(exc).__name__}: {exc}"
+        else:
+            self.classifier = noaa_models.classifier
+            self.anomaly_detector = noaa_models.anomaly_detector
+            self.shap_explainer = noaa_explainer
+            self.iso_low = noaa_models.iso_low
+            self.iso_high = noaa_models.iso_high
+            self.metrics = noaa_models.metrics
+            self.model_source = "noaa_historical_hybrid"
+            self.anomaly_description = noaa_models.anomaly_description
+            self.classifier_description = noaa_models.classifier_description
+            self.training_source = noaa_models.training_source
+            self.evaluation_note = noaa_models.evaluation_note
+            self.ready = True
+            return
+
+        # The artifact was missing or invalid, so train the original offline
+        # physics-guided model and keep the application usable.
         x, y = self._generate_training_data(samples_per_class=1800)
         x_train, x_test, y_train, y_test = train_test_split(
             x,
@@ -270,13 +312,19 @@ class DualEvidenceEngine:
     def model_info(self) -> dict[str, Any]:
         if not self.ready:
             self.initialize()
+        using_noaa = self.model_source == "noaa_historical_hybrid"
         return {
-            "anomaly_detector": "Isolation Forest trained on normal synthetic patterns",
-            "classifier": "Random Forest (Normal / Weather / Sensor Fault)",
-            "explainability": "SHAP TreeExplainer plus transparent rule reasons",
-            "training_source": (
-                "Physics-guided synthetic prototype data; historical AWS data is the "
-                "required next step for deployment."
+            "model_source": self.model_source,
+            "anomaly_detector": self.anomaly_description,
+            "classifier": self.classifier_description,
+            "explainability": (
+                "SHAP TreeExplainer plus transparent rule and spatial-evidence reasons"
+            ),
+            "training_source": self.training_source,
+            "evaluation_note": self.evaluation_note,
+            "fallback_active": not using_noaa,
+            "model_load_warning": (
+                None if using_noaa else self.model_load_warning
             ),
             "feature_names": FEATURE_NAMES,
             **self.metrics,
@@ -557,8 +605,10 @@ class DualEvidenceEngine:
         if fault_score >= 0.60 and fault_score >= weather_score + 0.08:
             return LABEL_FAULT
         if (
-            probabilities[LABEL_NORMAL] >= 0.58
+            probabilities[LABEL_NORMAL] >= 0.30
             and anomaly_score < 0.66
+            and weather_score < 0.45
+            and fault_score < 0.45
             and weather_rule_score < 0.45
             and fault_rule_score < 0.45
         ):

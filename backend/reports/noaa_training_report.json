@@ -1,0 +1,160 @@
+{
+  "generated_at_utc": "2026-09-21T16:21:02.440936+00:00",
+  "method": {
+    "anomaly_detector": "Isolation Forest fitted only on balanced real 2023 NOAA observations",
+    "classifier": "Random Forest fitted on real 2023 baseline proxies plus controlled weather and fault transformations",
+    "split": "Time-based: 2023 training; 2024 held-out evaluation",
+    "important_limitation": "NOAA observations do not contain verified fault labels. Controlled transformations are benchmark labels, not claims that those faults occurred historically."
+  },
+  "data": {
+    "train_file": "C:\\Users\\VICTUS\\OneDrive\\Documents\\Desktop\\SkyGuard-AI\\backend\\data\\noaa\\processed\\noaa_features_2023.csv",
+    "test_file": "C:\\Users\\VICTUS\\OneDrive\\Documents\\Desktop\\SkyGuard-AI\\backend\\data\\noaa\\processed\\noaa_features_2024.csv",
+    "real_train_rows": 10685,
+    "real_test_rows": 10335,
+    "balanced_train_rows": 3470,
+    "balanced_test_rows": 3305,
+    "stations_train": 5,
+    "stations_test": 5,
+    "train_period": [
+      "2023-01-01T00:00:00+00:00",
+      "2023-12-31T21:00:00+00:00"
+    ],
+    "test_period": [
+      "2024-01-01T00:00:00+00:00",
+      "2024-12-31T21:00:00+00:00"
+    ]
+  },
+  "controlled_2024_benchmark": {
+    "rows": 9915,
+    "accuracy": 0.9813414019162885,
+    "macro_f1": 0.981335810382641,
+    "labels": [
+      "Normal",
+      "Genuine Weather Event",
+      "Sensor/Data Fault"
+    ],
+    "confusion_matrix": [
+      [
+        3207,
+        94,
+        4
+      ],
+      [
+        85,
+        3219,
+        1
+      ],
+      [
+        0,
+        1,
+        3304
+      ]
+    ],
+    "classification_report": {
+      "Normal": {
+        "precision": 0.974179829890644,
+        "recall": 0.9703479576399395,
+        "f1-score": 0.9722601182355616,
+        "support": 3305.0
+      },
+      "Genuine Weather Event": {
+        "precision": 0.9713337356668679,
+        "recall": 0.9739788199697428,
+        "f1-score": 0.9726544795286297,
+        "support": 3305.0
+      },
+      "Sensor/Data Fault": {
+        "precision": 0.9984889694771835,
+        "recall": 0.999697428139183,
+        "f1-score": 0.9990928333837314,
+        "support": 3305.0
+      },
+      "accuracy": 0.9813414019162885,
+      "macro avg": {
+        "precision": 0.9813341783448984,
+        "recall": 0.9813414019162884,
+        "f1-score": 0.981335810382641,
+        "support": 9915.0
+      },
+      "weighted avg": {
+        "precision": 0.9813341783448983,
+        "recall": 0.9813414019162885,
+        "f1-score": 0.9813358103826408,
+        "support": 9915.0
+      }
+    }
+  },
+  "unmodified_real_2024_monitoring": {
+    "prediction_distribution": {
+      "Genuine Weather Event": 309,
+      "Normal": 10018,
+      "Sensor/Data Fault": 8
+    },
+    "isolation_forest_flag_count": 318,
+    "isolation_forest_flag_rate": 0.03076923076923077,
+    "interpretation": "These are model flags on unlabelled real observations, not verified false alarms or confirmed historical events."
+  },
+  "anomaly_threshold": -0.5011284501712769,
+  "top_classifier_features": [
+    {
+      "feature": "neighbor_temperature_difference",
+      "importance": 0.16802694926511424
+    },
+    {
+      "feature": "neighbor_pressure_difference",
+      "importance": 0.14176561840776808
+    },
+    {
+      "feature": "temporal_volatility",
+      "importance": 0.13562981051820572
+    },
+    {
+      "feature": "neighbor_humidity_difference",
+      "importance": 0.1274233810621412
+    },
+    {
+      "feature": "delta_pressure",
+      "importance": 0.07431627831885108
+    },
+    {
+      "feature": "timestamp_error",
+      "importance": 0.07100604359502363
+    },
+    {
+      "feature": "pressure",
+      "importance": 0.0640053162498064
+    },
+    {
+      "feature": "flatline_ratio",
+      "importance": 0.03876709423667565
+    },
+    {
+      "feature": "delta_temperature",
+      "importance": 0.03852121648468138
+    },
+    {
+      "feature": "temperature",
+      "importance": 0.035985467358810606
+    },
+    {
+      "feature": "missing_count",
+      "importance": 0.035869858238851714
+    },
+    {
+      "feature": "range_violation_count",
+      "importance": 0.02819711096267093
+    },
+    {
+      "feature": "humidity",
+      "importance": 0.020326046314473694
+    },
+    {
+      "feature": "delta_humidity",
+      "importance": 0.017643910715690415
+    },
+    {
+      "feature": "neighbor_count",
+      "importance": 0.0025158982712352143
+    }
+  ]
+}

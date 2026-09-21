@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Database,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
   Target,
 } from 'lucide-react';
@@ -185,6 +186,18 @@ export default function ModelInsightsPage() {
     modelInfo.holdout_macro_f1 * 100
   ).toFixed(1)}%`;
 
+  const usingNoaaModel =
+    modelInfo.model_source ===
+      'noaa_historical_hybrid' &&
+    !modelInfo.fallback_active;
+
+  const realTrainingRows =
+    modelInfo.real_training_rows ||
+    modelInfo.training_rows;
+
+  const realTestRows =
+    modelInfo.real_test_rows || modelInfo.test_rows;
+
   const largestMatrixValue = Math.max(
     ...modelInfo.confusion_matrix.flat(),
     1
@@ -232,21 +245,41 @@ export default function ModelInsightsPage() {
             </div>
           </div>
 
-          <button
-            onClick={() => void refreshModelInfo()}
-            disabled={isRefreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5 text-sm font-medium text-cyan-200 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw
-              className={`h-4 w-4 ${
-                isRefreshing ? 'animate-spin' : ''
+          <div className="flex flex-col gap-3 sm:items-end">
+            <div
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold ${
+                usingNoaaModel
+                  ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+                  : 'border-amber-400/30 bg-amber-500/10 text-amber-200'
               }`}
-            />
+            >
+              {usingNoaaModel ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <AlertTriangle className="h-3.5 w-3.5" />
+              )}
 
-            {isRefreshing
-              ? 'Refreshing...'
-              : 'Refresh metadata'}
-          </button>
+              {usingNoaaModel
+                ? 'Historical NOAA model active'
+                : 'Synthetic fallback active'}
+            </div>
+
+            <button
+              onClick={() => void refreshModelInfo()}
+              disabled={isRefreshing}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2.5 text-sm font-medium text-cyan-200 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw
+                className={`h-4 w-4 ${
+                  isRefreshing ? 'animate-spin' : ''
+                }`}
+              />
+
+              {isRefreshing
+                ? 'Refreshing...'
+                : 'Refresh metadata'}
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -256,48 +289,102 @@ export default function ModelInsightsPage() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-amber-500/20 bg-gradient-to-r from-amber-500/10 via-slate-900/70 to-slate-900/40 p-5 shadow-xl">
+        <div
+          className={`rounded-2xl border bg-gradient-to-r p-5 shadow-xl ${
+            usingNoaaModel
+              ? 'border-emerald-500/20 from-emerald-500/10 via-slate-900/70 to-slate-900/40'
+              : 'border-amber-500/20 from-amber-500/10 via-slate-900/70 to-slate-900/40'
+          }`}
+        >
           <div className="flex items-start gap-3">
-            <Database className="mt-0.5 h-5 w-5 shrink-0 text-amber-300" />
+            <Database
+              className={`mt-0.5 h-5 w-5 shrink-0 ${
+                usingNoaaModel
+                  ? 'text-emerald-300'
+                  : 'text-amber-300'
+              }`}
+            />
 
             <div>
               <h2 className="font-semibold text-white">
-                Prototype transparency
+                Data provenance
               </h2>
 
               <p className="mt-1 text-sm leading-6 text-slate-300">
                 {modelInfo.training_source}
               </p>
+
+              <p className="mt-3 font-mono text-[11px] uppercase tracking-[0.12em] text-slate-500">
+                Runtime source: {modelInfo.model_source}
+              </p>
             </div>
           </div>
         </div>
 
+        <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-5 shadow-xl">
+          <div className="flex items-start gap-3">
+            <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-cyan-300" />
+
+            <div>
+              <h2 className="font-semibold text-white">
+                Evaluation boundary
+              </h2>
+
+              <p className="mt-1 text-sm leading-6 text-slate-300">
+                {modelInfo.metric_scope ??
+                  'Controlled benchmark evaluation.'}
+              </p>
+
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                {modelInfo.evaluation_note}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {modelInfo.fallback_active &&
+          modelInfo.model_load_warning && (
+            <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+
+              <div>
+                <p className="font-semibold">
+                  Historical model unavailable
+                </p>
+
+                <p className="mt-1 break-words text-xs text-amber-200/70">
+                  {modelInfo.model_load_warning}
+                </p>
+              </div>
+            </div>
+          )}
+
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
-            label="Holdout accuracy"
+            label="Controlled accuracy"
             value={accuracy}
-            description="Correct classifications across the prototype holdout set."
+            description="Classification accuracy on the controlled, time-separated 2024 benchmark."
             tone="cyan"
           />
 
           <MetricCard
             label="Macro F1"
             value={macroF1}
-            description="Balanced performance across Normal, Weather and Fault classes."
+            description="Class-balanced score for Normal, Weather and Sensor/Data Fault."
             tone="emerald"
           />
 
           <MetricCard
-            label="Training rows"
-            value={modelInfo.training_rows.toLocaleString()}
-            description="Physics-guided samples used to train the prototype models."
+            label="Real NOAA 2023 rows"
+            value={realTrainingRows.toLocaleString()}
+            description={`${modelInfo.training_rows.toLocaleString()} balanced and controlled training examples were used by the classifier.`}
             tone="indigo"
           />
 
           <MetricCard
-            label="Test rows"
-            value={modelInfo.test_rows.toLocaleString()}
-            description="Held-out samples used only for model evaluation."
+            label="Real NOAA 2024 rows"
+            value={realTestRows.toLocaleString()}
+            description={`${modelInfo.test_rows.toLocaleString()} controlled benchmark examples were evaluated without training on 2024.`}
             tone="amber"
           />
         </div>
@@ -347,8 +434,8 @@ export default function ModelInsightsPage() {
             </div>
 
             <p className="mt-1 text-xs text-slate-500">
-              Rows are actual classes; columns are model
-              predictions.
+              Controlled 2024 benchmark only. Rows are
+              benchmark classes; columns are predictions.
             </p>
 
             <div className="mt-5 overflow-x-auto">

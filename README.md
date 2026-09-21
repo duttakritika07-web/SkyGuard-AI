@@ -13,7 +13,23 @@ SkyGuard AI is an AI-assisted weather-station monitoring system designed to dist
 
 The system monitors temperature, atmospheric pressure, and relative humidity readings from Automatic Weather Stations (AWS). It combines machine learning, physical validation rules, temporal analysis, and neighbouring-station evidence to reduce false alarms.
 
-> **Prototype disclosure:** The current version uses simulated stations and physics-guided synthetic training and demonstration data. It is not currently connected to live IMD or NOAA services and must not be treated as an operational weather-warning system.
+> **Prototype disclosure:** The runtime dashboard uses five simulated stations for repeatable demonstrations. The active ML artifact is trained with quality-controlled historical NOAA NCEI observations from five West Bengal stations (2023 training, 2024 time-separated evaluation) plus clearly identified controlled weather/fault transformations. It does not use live IMD or live NOAA feeds and must not be treated as an operational weather-warning system.
+
+## Current Verified Status
+
+| Item | Result |
+|---|---:|
+| Real NOAA 2023 observations | 10,685 rows |
+| Real held-out NOAA 2024 observations | 10,335 rows |
+| Historical stations | 5 |
+| Model features | 15 |
+| Controlled benchmark accuracy | 98.13% |
+| Controlled benchmark Macro F1 | 98.13% |
+| Backend tests | 5 passed |
+| Demonstration scenarios | 10/10 expected decisions |
+| Frontend verification | ESLint and production build passed |
+
+The accuracy and Macro F1 values describe a controlled benchmark, not field-certified operational accuracy. See the [NOAA Historical Model Card](backend/NOAA_MODEL_CARD.md) for data provenance, station IDs, methodology, confusion matrix, limitations, and reproduction commands.
 
 ---
 
@@ -64,8 +80,11 @@ The system also provides:
 - Five simulated AWS stations
 - Temperature, pressure, and humidity monitoring
 - Hybrid Dual-Evidence Engine
-- Isolation Forest anomaly detection
-- Random Forest classification
+- Isolation Forest fitted on balanced historical NOAA 2023 observations
+- Random Forest classification using real baselines and controlled transformations
+- Time-separated 2024 evaluation to reduce temporal leakage
+- Reproducible NOAA downloader, cleaner, feature pipeline, and training script
+- Automatic synthetic fallback if the historical model artifact is unavailable
 - Physical range and consistency checks
 - Temporal spike, drift, flatline, noise, and dropout detection
 - Neighbouring-station comparison
@@ -90,19 +109,15 @@ The system also provides:
 
 ```mermaid
 flowchart TD
-    A["AWS Reading or Scenario Generator"] --> B["FastAPI Validation Layer"]
-    B --> C["Dual-Evidence Engine"]
-    C --> D["Rules and Temporal Analysis"]
-    C --> E["Isolation Forest"]
-    C --> F["Random Forest and SHAP"]
-    C --> G["Neighbouring-Station Evidence"]
-    D --> H["Decision Engine"]
-    E --> H
-    F --> H
-    G --> H
-    H --> I["SQLite Storage"]
-    I --> J["FastAPI Endpoints"]
-    J --> K["Next.js Dashboard"]
+    A["NOAA 2023/2024 Archive"] --> B["QC, Cleaning and Features"]
+    B --> C["Versioned Model Artifact"]
+    D["AWS Reading or Scenario Generator"] --> E["FastAPI Validation Layer"]
+    C --> F["Dual-Evidence Engine"]
+    E --> F
+    F --> G["Rules, ML, Temporal and Spatial Evidence"]
+    G --> H["Decision and SHAP Explanation"]
+    H --> I["SQLite and REST API"]
+    I --> J["Next.js Dashboard"]
 ```
 
 ### Processing Flow
@@ -167,8 +182,32 @@ The final decision is based on the combined evidence rather than one fixed thres
 | Database | SQLite and SQLAlchemy | Local persistent storage |
 | Machine learning | scikit-learn | Isolation Forest and Random Forest |
 | Explainability | SHAP | Model feature contributions |
-| Data processing | NumPy and pandas | Data preparation and evaluation |
+| Historical data | NOAA NCEI Global Hourly / ISD | Quality-controlled training and evaluation observations |
+| Data processing | NumPy and pandas | Download cleaning, feature engineering and evaluation |
 | Testing | pytest and HTTPX | Backend engine and API tests |
+
+---
+
+## Historical NOAA Data and Model
+
+The active artifact uses official NOAA NCEI Global Hourly observations from:
+
+| Station ID | Historical station |
+|---|---|
+| `42809099999` | Netaji Subhash Chandra Bose International |
+| `42807099999` | Behala |
+| `42805099999` | Uluberia |
+| `42811099999` | Diamond Harbour |
+| `42812099999` | Canning |
+
+The time split is intentionally chronological:
+
+- **2023:** model training baseline
+- **2024:** held-out evaluation year
+
+NOAA provides quality-controlled observations but not verified fault labels for this problem. The supervised classifier therefore combines real baseline rows with controlled regional-weather and sensor-fault transformations. Injected or transformed examples are never presented as confirmed historical events.
+
+The full methodology is documented in [backend/NOAA_MODEL_CARD.md](backend/NOAA_MODEL_CARD.md).
 
 ---
 
@@ -195,6 +234,10 @@ SkyGuard-AI/
 ├── backend/
 │   ├── main.py
 │   ├── ml_engine.py
+│   ├── noaa_data.py
+│   ├── noaa_features.py
+│   ├── train_noaa_model.py
+│   ├── noaa_model_runtime.py
 │   ├── scenario_generator.py
 │   ├── simulate_stream.py
 │   ├── services.py
@@ -204,6 +247,11 @@ SkyGuard-AI/
 │   ├── seed.py
 │   ├── config.py
 │   ├── evaluate_model.py
+│   ├── models/
+│   │   └── noaa_hybrid_model.joblib
+│   ├── reports/
+│   │   └── noaa_training_report.json
+│   ├── NOAA_MODEL_CARD.md
 │   ├── requirements.txt
 │   ├── PROJECT_WALKTHROUGH.md
 │   └── tests/
@@ -319,7 +367,7 @@ Open the dashboard:
 |---|---|
 | `/` | Main monitoring dashboard |
 | `/stations` | Station list and coordinate map |
-| `/stations/[id/[id]` | Individual station analysis |
+| `/stations/[id]` | Individual station analysis |
 | `/alerts` | Anomaly and weather-event alerts |
 | `/maintenance` | Sensor health and session maintenance planner |
 | `/simulation` | Backend-powered Scenario Lab |
@@ -365,7 +413,7 @@ Scenario labels are stored for demonstration and auditing only. They are not pro
 |---|---|---|
 | `GET` | `/` | Backend information |
 | `GET` | `/health` | API, model, and database health |
-| `GET` | `/model-info` | Model features and prototype metrics |
+| `GET` | `/model-info` | Active model source, provenance, features, metrics and fallback state |
 | `GET` | `/stations` | Station metadata |
 | `GET` | `/snapshots` | Combined station dashboard data |
 | `GET` | `/readings/latest` | Latest readings |
@@ -419,7 +467,7 @@ venv\Scripts\python.exe -m pytest -q
 venv\Scripts\python.exe evaluate_model.py
 ```
 
-The displayed accuracy and F1 results represent synthetic holdout performance. They are not real IMD field-performance claims.
+The displayed accuracy and F1 results represent the controlled, time-separated 2024 benchmark. They are not real IMD field-performance claims or proof of operational performance.
 
 ### Frontend lint check
 
@@ -441,26 +489,32 @@ npm run build
 
 The current prototype uses:
 
-- Physics-guided synthetic training patterns
-- Simulated station readings
-- Explicit demonstration scenarios
-- Generated normal, weather-event, and sensor-fault patterns
+- Official historical NOAA NCEI Global Hourly observations
+- 10,685 real 2023 observations for the training-year baseline
+- 10,335 real 2024 observations for held-out-year evaluation
+- Station balancing so high-volume stations do not dominate training
+- Controlled weather and fault transformations for supervised labels
+- Simulated live stations and explicit scenarios for a repeatable demonstration
+- A compact versioned model artifact that is validated when FastAPI starts
 
 The current prototype does **not** use:
 
 - Live IMD station readings
-- Live NOAA data
-- A live Kaggle dataset connection
+- A live NOAA stream
+- Kaggle training data
+- Verified historical sensor-fault labels
 - Operational disaster-warning feeds
 - Field-certified sensor calibration data
 
-Real historical NOAA, IMD, or verified AWS datasets can be added during the validation phase. A final scientific evaluation should use time-aware and station-aware dataset splits so that readings from the same event do not leak into both training and testing data.
+Raw and processed NOAA CSV files are excluded from Git because they can be reproduced using the included downloader and feature scripts. The trained artifact, report, source code, checksums/manifests produced locally, tests, and model card preserve reproducibility and auditability.
 
 ---
 
 ## Current Limitations
 
-- Training and demonstration data are synthetic.
+- NOAA does not provide verified sensor-fault labels for this supervised task.
+- Controlled transformations do not replace field-labelled AWS validation.
+- Historical coverage is limited to five West Bengal stations and two years.
 - SQLite is intended for prototype-scale local storage.
 - The Maintenance Planner is session-only and resets when the page reloads.
 - Alert workflow actions are not yet persisted for multiple users.
@@ -474,8 +528,8 @@ Real historical NOAA, IMD, or verified AWS datasets can be added during the vali
 
 ## Future Development
 
-- Integrate verified historical IMD or NOAA weather data
-- Evaluate with station-aware and time-aware validation
+- Validate against authorised, field-labelled IMD/AWS fault records
+- Expand station-aware evaluation across more Indian climate regions and years
 - Measure false-alarm and missed-event rates
 - Add live MQTT or AWS data ingestion
 - Add authenticated user roles

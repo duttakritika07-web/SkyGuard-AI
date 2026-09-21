@@ -81,17 +81,28 @@ export interface ApiScenarioResult {
 }
 
 export interface ApiModelInfo {
+  model_source: string;
   anomaly_detector: string;
   classifier: string;
   explainability: string;
   training_source: string;
+  evaluation_note: string;
+  fallback_active: boolean;
+  model_load_warning: string | null;
+
   feature_names: string[];
+
   holdout_accuracy: number;
   holdout_macro_f1: number;
   labels: string[];
   confusion_matrix: number[][];
+
   training_rows: number;
   test_rows: number;
+
+  real_training_rows: number;
+  real_test_rows: number;
+  metric_scope: string | null;
 }
 
 async function request<T>(
