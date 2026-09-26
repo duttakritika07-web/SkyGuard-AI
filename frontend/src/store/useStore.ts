@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import { Station, Reading, Alert, mockStations, generateMockReadings, initialMockAlerts, DecisionStatus, AlertStatus } from './mockData';
-import { skyguardApi } from '@/lib/api';
+import { skyguardApi, type ApiPrediction } from '@/lib/api';
 
 import {
+  classificationToDecision,
   predictionToAlert,
   predictionToReading,
   snapshotToStation,
@@ -25,6 +26,7 @@ lastUpdated: string | null;
   scheduleMaintenance: (stationId: string, sensorId: string, date: string, notes: string) => void;
   flagForManualCheck: (stationId: string) => void;
   refreshFromApi: () => Promise<void>;
+  applyScenarioResults: (results: ApiPrediction[]) => void;
 
 runBackendScenario: (
   scenarioName: string
@@ -109,6 +111,56 @@ refreshFromApi: async () => {
           : 'Unable to load backend data.',
     });
   }
+},
+
+applyScenarioResults: (results) => {
+  if (!results.length) return;
+
+  set(state => {
+    const stationMap = new Map(
+      results.map(result => [result.station_id, result])
+    );
+
+    const nextStations = state.stations.map(station => {
+      const result = stationMap.get(station.id);
+      if (!result) {
+        return station;
+      }
+
+      const decision = classificationToDecision(
+        result.classification
+      );
+
+      return {
+        ...station,
+        status: decision,
+        healthScore: Math.max(
+          0,
+          Math.min(100, Math.round(result.confidence * 100))
+        ),
+        lastReading: {
+          temperature: result.temperature ?? station.lastReading.temperature,
+          pressure: result.pressure ?? station.lastReading.pressure,
+          humidity: result.humidity ?? station.lastReading.humidity,
+          timestamp: result.observed_at,
+        },
+      };
+    });
+
+    const nextAlerts = [
+      ...results.map(predictionToAlert),
+      ...state.alerts,
+    ].slice(0, 30);
+
+    return {
+      stations: nextStations,
+      alerts: nextAlerts,
+      dataSource: 'api',
+      isLoading: false,
+      apiError: null,
+      lastUpdated: new Date().toISOString(),
+    };
+  });
 },
 
 runBackendScenario: async (

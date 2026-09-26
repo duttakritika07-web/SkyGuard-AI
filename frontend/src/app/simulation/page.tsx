@@ -120,6 +120,9 @@ export default function SimulationPage() {
   const refreshFromApi = useStore(
     state => state.refreshFromApi
   );
+  const applyScenarioResults = useStore(
+    state => state.applyScenarioResults
+  );
 
   const dataSource = useStore(
     state => state.dataSource
@@ -211,6 +214,7 @@ export default function SimulationPage() {
         `${response.readings_processed} readings processed.`
       );
 
+      applyScenarioResults(response.final_results);
       await refreshFromApi();
       await delay(250);
 
